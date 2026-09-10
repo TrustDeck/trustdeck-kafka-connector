@@ -18,6 +18,7 @@
 package org.trustdeck.connector.kafka.operation;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
@@ -82,13 +83,11 @@ public class PseudonymBatchService {
             throw new IllegalArgumentException("Pseudonym batch cannot be serialized.", exception);
         }
         BatchResult<Pseudonym> result = client.pseudonyms(domain).createBatch(request, false);
-        if (result.items().size() != messages.size()) {
-            throw new IllegalStateException("Pseudonym batch response is partial or cannot be correlated safely.");
-        }
         Map<String, Queue<Integer>> occurrences = new HashMap<>();
         for (int index = 0; index < messages.size(); index++) {
             occurrences.computeIfAbsent(key(messages.get(index)), ignored -> new ArrayDeque<>()).add(index);
         }
+        List<Pseudonym> correlated = new ArrayList<>(messages.size());
         for (Pseudonym returned : result.items()) {
             if (returned == null || returned.getIdentifierItem() == null) {
                 throw new IllegalStateException("Pseudonym batch response correlation is ambiguous.");
@@ -98,11 +97,23 @@ public class PseudonymBatchService {
                 throw new IllegalStateException("Pseudonym batch response correlation is ambiguous.");
             }
             indexes.remove();
+            correlated.add(returned);
         }
-        if (occurrences.values().stream().anyMatch(queue -> !queue.isEmpty())) {
+        if (!result.partial() && occurrences.values().stream().anyMatch(queue -> !queue.isEmpty())) {
             throw new IllegalStateException("Pseudonym batch response omitted an input record.");
         }
-        return result.items();
+        if (result.partial()) {
+            if (correlated.isEmpty()) {
+                throw new IllegalStateException("Partial pseudonym response has no safely correlated successes.");
+            }
+            for (Queue<Integer> unresolved : occurrences.values()) {
+                while (!unresolved.isEmpty()) {
+                    int index = unresolved.remove();
+                    correlated.add(client.pseudonyms(domain).create(request.get(index), false));
+                }
+            }
+        }
+        return correlated;
     }
 
     /**

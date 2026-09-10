@@ -101,7 +101,14 @@ public class ConnectorListener {
             }
         }
         if (properties.getOperation().equals("CREATE_PSEUDONYM") && safeBatch(records, mapped)) {
-            batches.execute(mapped);
+            try {
+                batches.execute(mapped);
+            } catch (Exception failure) {
+                if (systemic(failure)) {
+                    outage.pause(category(failure));
+                }
+                throw failure;
+            }
             acknowledgment.acknowledge();
             return;
         }

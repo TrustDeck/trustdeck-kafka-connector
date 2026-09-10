@@ -20,6 +20,9 @@ package org.trustdeck.connector.kafka.kafka;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.concurrent.TimeUnit;
+import java.util.Map;
+import java.util.Set;
+import java.nio.charset.StandardCharsets;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -106,7 +109,7 @@ public class RecoveryPublisher {
                 record.offset(), record.timestamp() < 0 ? null : java.time.Instant.ofEpochMilli(record.timestamp()),
                 properties.getOperation(), mapped == null ? null : mapped.domain(), category, httpStatus(failure), attempts,
                 null, null, record.key() == null ? null : Base64.getEncoder().encodeToString(record.key()),
-                Base64.getEncoder().encodeToString(record.value()), mapped == null ? null : mapped.username());
+                Base64.getEncoder().encodeToString(record.value()), mapped == null ? null : mapped.username(), safeHeaders(record));
         String json = mapper.writeValueAsString(envelope);
         String key = record.key() == null ? null : Base64.getEncoder().encodeToString(record.key());
         template.send(topic, key, json).get(Duration.ofSeconds(10).toMillis(), TimeUnit.MILLISECONDS);
@@ -115,5 +118,14 @@ public class RecoveryPublisher {
     /** Extracts only the numeric status from a client response exception. */
     private Integer httpStatus(Throwable failure) {
         return failure instanceof TrustDeckResponseException response ? response.getStatusCode() : null;
+    }
+
+    /** Copies only bounded, explicitly safe provenance headers. */
+    private Map<String, String> safeHeaders(ConsumerRecord<byte[], byte[]> record) {
+        Set<String> allowed = Set.of("correlation-id", "traceparent", "event-type");
+        return java.util.Arrays.stream(record.headers().toArray())
+                .filter(header -> allowed.contains(header.key()) && header.value() != null && header.value().length <= 256)
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(header -> header.key(),
+                        header -> new String(header.value(), StandardCharsets.UTF_8), (first, last) -> last));
     }
 }
