@@ -1,6 +1,6 @@
 # TrustDeck Kafka Connector Plan
 
-Status: planning checkpoint. This file is the only application-repository artifact in this bootstrap commit. No application code is implemented yet.
+Status: approved for implementation. Synthetic entity fixtures are test-only and do not define a production schema.
 
 ## Scope and Architecture
 
@@ -22,7 +22,7 @@ The success path is centralized so a future result publisher can receive the sou
 
 ## Operation Matrix
 
-All paths are relative to the configured TrustDeck base URL and use client `1.0.1` services. `omitPrefix=false` is always used for creates.
+All paths are relative to the configured TrustDeck base URL and use the separately maintained client development build described below. `omitPrefix=false` is always used for creates.
 
 | Operation | Client method and endpoint | Required mapping/behavior |
 |---|---|---|
@@ -42,9 +42,9 @@ The service-account user is granted only the following resource permissions on c
 
 | Use | Exact permissions |
 |---|---|
-| Static project/type preflight and entity CRUD | Project `project:read`; type `type:read`; entity type `entity:create`, `entity:read`, `entity:update`, and/or `entity:delete` for enabled operations. |
+| Static project/type preflight and entity CRUD | Project `project:read`; type `type:read`; entity type `entity:create`, `entity:read`, `entity:update`, and/or `entity:delete` for enabled operations. `entity:create` also covers combined creation's first stage. |
 | Entity linkage review | `entity:record-linkage` only if the implementation uses the dedicated candidate endpoint; never grant or request `entity:resolve-linkage` because the connector does not auto-select/merge or use `CREATE_ORIGINAL`. |
-| Entity-associated pseudonym inspection | `entity:list-pseudonyms`; associated domain `pseudonym:read`; `pseudonym:link` and target-domain `pseudonym:read`/`pseudonym:link` only if linked-pseudonym verification is explicitly configured. |
+| Entity-associated pseudonym inspection | `entity:list-pseudonyms`; associated domain `pseudonym:read`; `pseudonym:link` and target-domain `pseudonym:read`/`pseudonym:link` only if linked-pseudonym verification is explicitly configured. Combined creation requires these reads only when associated-domain verification is enabled. |
 | Pseudonym create | Target domain `pseudonym:create`; batch fallback additionally `pseudonym:create-batch`. |
 | Pseudonym update | Old domain `pseudonym:update`; complete identifier/domain/value change additionally `pseudonym:update-complete`, plus target-domain authorization enforced by the backend. Batch update is not used until correlation/field support is verified; if enabled it needs `pseudonym:update-batch`. |
 | Pseudonym delete/read | Domain `pseudonym:delete` and `pseudonym:read` for identifier lookup. `pseudonym:read-batch` and `pseudonym:delete-batch` are never required. |
@@ -61,7 +61,7 @@ spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
     consumer:
-      group-id: ${KAFKA_GROUP_ID:ths-external-trustdeck}
+      group-id: ${KAFKA_GROUP_ID}
       enable-auto-commit: false
       auto-offset-reset: earliest
       max-poll-records: ${KAFKA_MAX_POLL_RECORDS:100}
@@ -73,28 +73,28 @@ trustdeck:
   client-id: ${KEYCLOAK_CLIENT_ID}
   client-secret: ${KEYCLOAK_CLIENT_SECRET}
   project: ${TRUSTDECK_PROJECT}
-  operation: ${TRUSTDECK_OPERATION:CREATE_PSEUDONYM}
+  operation: ${TRUSTDECK_OPERATION}
 
 mapping:
   domain-constant: ${TRUSTDECK_DOMAIN:}
-  domain-path: ${KAFKA_MESSAGE_SOURCE_SYSTEM_DESCRIPTOR:/c_source_domain}
-  identifier-path: ${KAFKA_MESSAGE_IDENTIFIER_DESCRIPTOR:/c_value}
-  id-type-path: ${KAFKA_MESSAGE_IDTYPE_DESCRIPTOR:/c_type_of_pseudonym}
-  psn-path: ${KAFKA_MESSAGE_PSN_DESCRIPTOR:/c_pseudonym}
-  valid-from-path: ${KAFKA_MESSAGE_VALID_FROM_DESCRIPTOR:/t_timestamp}
+  domain-path: ${KAFKA_MESSAGE_SOURCE_SYSTEM_DESCRIPTOR:}
+  identifier-path: ${KAFKA_MESSAGE_IDENTIFIER_DESCRIPTOR:}
+  id-type-path: ${KAFKA_MESSAGE_IDTYPE_DESCRIPTOR:}
+  psn-path: ${KAFKA_MESSAGE_PSN_DESCRIPTOR:}
+  valid-from-path: ${KAFKA_MESSAGE_VALID_FROM_DESCRIPTOR:}
   source-timezone: ${MAPPING_SOURCE_TIMEZONE:UTC}
-  datetime-format: ${MAPPING_DATETIME_FORMAT:uuuu-MM-dd HH:mm:ss.SSS}
+  datetime-format: ${MAPPING_DATETIME_FORMAT:}
 
 recovery:
   dlt-topic: ${KAFKA_DLT_TOPIC:${KAFKA_TOPIC}.DLT}
   review-topic: ${KAFKA_REVIEW_TOPIC:${KAFKA_TOPIC}.REVIEW}
 ```
 
-The final classpath `application.yaml`, sanitized `.env.example`, mounted per-instance YAML examples, TLS truststore settings, all familiar `KAFKA_*` names, SMTP names, and WSL `set -a; source ./.env; set +a; ./mvnw spring-boot:run` instructions will be added after approval. Maven does not source `.env` automatically. The sample domain remains `/c_source_domain` (`datalake`) unless the confirmed configuration sets a constant; no source-system translation is invented. Generic defaults use UTC, while the concrete sample must use the confirmed timezone.
+The classpath `application.yaml` is generic: it has no sample field, domain, project, entity-type, timestamp format, username, host, or credential defaults. The selected operation controls validation. Pseudonym operations do not require project/entity mappings; optional psn/validity/provenance mappings may be absent; a nonblank constant domain works without a domain path; missing required settings fail startup clearly. `examples/sample-pseudonym.yaml` explicitly maps `/c_source_domain`, `/c_value`, `/c_type_of_pseudonym`, `/c_pseudonym`, `/t_timestamp`, and `Europe/Berlin` with the sample format. Maven does not source `.env` automatically. The implementation supports any configured domain path and constant override without translation.
 
 ## Time and Input Rules
 
-Offset/Z timestamps are converted by instant to UTC. Naive timestamps use a configured IANA zone and strict format, then become UTC wall-clock `LocalDateTime` values on the TrustDeck pseudonym wire. Ambiguous or DST-gap local times are rejected. JVM/container default timezone is UTC but is not relied upon. Date-only values and undeclared entity strings remain unchanged. Missing, JSON null, blank, wrong type, root arrays, primitives, invalid UTF-8/JSON, trailing values, excessive nesting, and oversized records are distinct validation failures. Bare top-level descriptors are accepted only through documented unambiguous conversion to a JSON Pointer.
+Offset/Z timestamps are converted by instant to UTC. Naive timestamps use a configured IANA zone and strict format, then become UTC wall-clock `LocalDateTime` values on the TrustDeck pseudonym wire. The approved sample uses `Europe/Berlin`; its `t_timestamp` is pseudonym `validFrom`. Ambiguous or DST-gap local times are rejected. Missing validity fields stay absent so backend defaults apply. JVM/container default timezone is UTC but is not relied upon. Date-only values and undeclared entity strings remain unchanged. Missing, JSON null, blank, wrong type, root arrays, primitives, invalid UTF-8/JSON, trailing values, excessive nesting, and oversized records are distinct validation failures. Bare top-level descriptors are accepted only through documented unambiguous conversion to a JSON Pointer.
 
 ## Failure, Offsets, and Recovery
 
@@ -104,9 +104,9 @@ Review publication is terminal only after broker confirmation and uses `PENDING_
 
 ## Dependencies and Licensing
 
-Use Java 21, Spring Boot 3.5.16 and its managed Spring Kafka line, Jackson/Lombok, Actuator, validation, mail, the TrustDeck client, and Testcontainers/JUnit in test scope. Boot 3.5 is selected because it remains compatible with Spring Framework 6.2 used by client `1.0.1`; resolved dependency convergence will be checked. Direct dependency/plugin comments will state actual purpose and license. MIT/BSD/Apache-2.0 and permitted EPL-2.0 components are acceptable; no EPL component is described as Apache relicensed. The client runtime `slf4j-simple` must be excluded so Boot supplies one logging backend.
+Use Java 21, Spring Boot 3.5.16 and its managed Spring Kafka line, Jackson/Lombok, Actuator, validation, mail, the TrustDeck client development build, and Testcontainers/JUnit in test scope. Boot 3.5 is selected because it remains compatible with Spring Framework 6.2 used by the client. Direct dependency/plugin comments will state actual purpose and license. MIT/BSD/Apache-2.0 and permitted EPL-2.0 components are acceptable; no EPL component is described as Apache relicensed. The client runtime `slf4j-simple` must be excluded so Boot supplies one logging backend.
 
-`org.trustdeck:client:1.0.1` is absent from Maven Central. It must be resolved from authenticated GitHub Packages using Maven settings, or from a pinned local source build of the exact client SHA until a published release is available. The connector will not depend on an unpublished client feature under `1.0.1`.
+`org.trustdeck:client:1.0.2-SNAPSHOT` is a local development coordinate only and must not overwrite or impersonate released `1.0.1`. It contains the approved optional transport timeout feature: connect default 5 seconds and response-read default 30 seconds, with backward-compatible constructors. The sibling client change is on a separate feature branch, tested but unpublished. Maven and Docker use a reproducible pinned-source build/install path until publication; no client credentials convenience API is added.
 
 ## Tests and Verification
 
@@ -134,13 +134,10 @@ Verification includes clean `./mvnw verify`, strict Javadocs including private m
 
 The current API cannot reliably provide original Kafka-user REST audit attribution, strict exactly-once effects, safe generic entity update/delete without a mapped TrustDeck UUID, or automatic resolution of record-linkage conflicts. Identifier-only pseudonym reads/deletes are inherently ambiguous when a domain allows multiple pseudonyms. Batch response bodies do not contain enough guaranteed correlation information for every generated/imported/repeated input, so singles or explicit unknown outcomes are required. The backend's mixed local-clock/UTC comparisons and timezone-free `LocalDateTime` wire contract cannot be completely repaired by connector conversion.
 
-## Approval Questions
+## Approved Decisions
 
-1. Confirm the timezone that produced the sample's offset-free `t_timestamp`; `Europe/Berlin` is only a proposed assumption. Confirm that this timestamp means pseudonym `validFrom`.
-2. Provide one synthetic entity message plus its existing entity-type schema, and update/delete examples if available. Otherwise approve clearly labeled synthetic fixtures with explicit configurable mappings. Confirm required pseudonym update fields, including identifier/domain/value changes through `updateComplete`.
-3. Confirm `/c_source_domain` as the example domain selector rather than `/c_target_domain`. The implementation supports any configured path and a constant override without translating source names or slash-containing values.
-4. Approve or reject each client-library proposal independently:
-   - Add optional finite HTTP connect/read timeout and transport configuration with backward-compatible constructors and safe defaults. Benefit: all client applications can avoid indefinite resource calls; connector-local alternative: an externally controlled network timeout, which cannot reliably bound the library's `RestClient` call.
-   - No client credentials convenience API is proposed now because the connector can use `AccessTokenProvider` and standard OAuth client-credentials code. If that proves insufficient, it will be a separate proposal with caching, expiry skew, thread-safe refresh, finite token timeout, and cleanup.
-
-General connector approval does not authorize edits to `trustdeck-client`; any approved client change gets a separate feature branch, tests, version, and published-or-pinned dependency decision.
+- The sample's `t_timestamp` is `validFrom` from `Europe/Berlin`; explicit conversion preserves the instant and rejects DST ambiguity/gaps.
+- No production entity schema was supplied. Synthetic entity messages and matching schemas are clearly labeled test fixtures with configurable mappings only.
+- All seven operations remain in scope. Pseudonym validity and explicitly mapped identifier/domain/value changes use the backend-supported standard or complete client method; nothing moves or regenerates implicitly.
+- `/c_source_domain` is the sample selector. A nonblank configured constant wins; generic configuration has no sample-specific default.
+- The timeout-only client feature is approved. No client-credentials convenience API or unrelated transport framework is approved.
