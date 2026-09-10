@@ -111,6 +111,12 @@ public class OperationService {
      */
     private Pseudonym updatePseudonym(MappedMessage message) {
         IdentifierItem oldItem = item(message.oldIdentifier(), message.oldIdType());
+        if (oldItem == null) {
+            throw new IllegalArgumentException("Pseudonym update needs the complete old selector.");
+        }
+        if ((message.newIdentifier() == null) != (message.newIdType() == null)) {
+            throw new IllegalArgumentException("Replacement identifier and id type must be mapped together.");
+        }
         PseudonymUpdate update = PseudonymUpdate.builder().oldIdentifierItem(oldItem).oldPsn(message.oldPsn())
                 .newIdentifierItem(item(message.newIdentifier(), message.newIdType()))
                 .newPsn(message.newPsn()).validFrom(message.validFrom()).validTo(message.validTo()).build();
@@ -136,8 +142,12 @@ public class OperationService {
         if (message.identifier() == null || message.idType() == null) {
             throw new IllegalArgumentException("Pseudonym deletion needs psn or identifier and idType.");
         }
-        return client.pseudonyms(message.domain()).delete(IdentifierItem.builder()
+        Pseudonym selected = client.pseudonyms(message.domain()).get(IdentifierItem.builder()
                 .identifier(message.identifier()).idType(message.idType()).build());
+        if (selected == null || selected.getPsn() == null) {
+            throw new IllegalStateException("Identifier lookup returned no deletable pseudonym.");
+        }
+        return client.pseudonyms(message.domain()).delete(selected.getPsn());
     }
 
     /**
@@ -201,7 +211,11 @@ public class OperationService {
         List<Pseudonym> associated = client.entities(properties.getTrustdeck().getProject(), message.entityType())
                 .getPseudonyms(entityId).items();
         for (Pseudonym existing : associated) {
-            if (message.domain().equals(existing.getDomainName())) {
+            IdentifierItem existingItem = existing.getIdentifierItem();
+            boolean sameEntity = existingItem != null && entityId.toString().equals(existingItem.getIdentifier())
+                    && "TrustDeckID".equals(existingItem.getIdType());
+            boolean sameRequestedValue = message.psn() == null || message.psn().equals(existing.getPsn());
+            if (sameEntity && message.domain().equals(existing.getDomainName()) && sameRequestedValue) {
                 return existing;
             }
         }
