@@ -114,6 +114,47 @@ Tests will exercise all seven operations against a controlled HTTP stub using th
 
 Verification includes clean `./mvnw verify`, strict Javadocs including private members and test-source checks, dependency/license review, `git diff --check`, Compose config validation, Docker build without host Maven-cache reliance, and disposable readiness/liveness checks. Unavailable credentials/services will be reported as unverified with exact commands.
 
+## Implementation Checklist
+
+This checklist is maintained against the complete approved scope, not just compilation.
+
+### Implemented and verified
+
+- Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, and baseline documentation.
+- Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
+- TrustDeck client adapter with OAuth client-credentials token caching and finite connect/read timeout configuration.
+- Basic HTTP operation dispatch and mapper tests; `mvn test` currently passes 7 tests.
+- Client timeout change is isolated on `feature/http-timeouts`, commit `5ca64d7`, with the client test suite previously passing 73 tests.
+
+### Implemented but not verified
+
+- Pseudonym batch request construction and occurrence-aware response matching.
+- Combined entity/pseudonym dispatch with bounded in-memory completed-stage state.
+- Batch Kafka listener wiring, recovery envelope model, health indicator, and notification bean wiring.
+- Docker builder path for the pinned client development commit.
+- Strict Javadoc execution and current handwritten declaration documentation.
+
+### Missing or incomplete
+
+- Partition-safe per-record acknowledgments and partial-batch fallback/outcomes.
+- Systemic failure classification, listener pause/resume, authenticated probes, and outage notifications.
+- Readiness-only degradation with independent liveness behavior.
+- Recovery publication using the Spring `ObjectMapper`, original key bytes, safe headers, HTTP status, full target, and combined stage/UUID metadata.
+- Complete delete-pseudonym ambiguity lookup, update selector validation, and operation-specific configuration/target-path validation.
+- Combined associated-pseudonym verification, durable/replayable stage handling, and all seven-operation HTTP contract coverage.
+- Meaningful Kafka/restart/producer-failure/outage/offset integration tests, partial 206 tests, token refresh tests, health tests, and SMTP suppression tests.
+- Dependency/license report, whitespace/Compose/Docker checks, and disposable runtime health verification.
+- Compose instance configuration/template consistency and complete operation-specific environment documentation.
+
+### Blocked
+
+- Live backend permission preflight and end-to-end TrustDeck verification are blocked until isolated synthetic development credentials/resources are available.
+- Disposable Kafka and Docker runtime checks are blocked if the local Docker daemon is unavailable; this will be tested explicitly rather than using development services.
+
+### Next concrete action
+
+Fix all remaining strict Javadoc diagnostics, commit the current coherent mapping/Kafka/batch chunk, then implement partition-safe outcomes and systemic outage pause/resume before expanding integration coverage.
+
 ## Proposed Commits
 
 1. `chore: bootstrap planning and repository metadata`

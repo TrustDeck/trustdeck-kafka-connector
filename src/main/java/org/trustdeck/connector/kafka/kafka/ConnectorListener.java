@@ -58,6 +58,7 @@ public class ConnectorListener {
      * @param operations operation service
      * @param recovery recovery publisher
      * @param properties connector settings
+     * @param batches pseudonym batch service
      */
     public ConnectorListener(JsonMessageMapper mapper, OperationService operations,
                              RecoveryPublisher recovery, ConnectorProperties properties,
@@ -72,7 +73,7 @@ public class ConnectorListener {
     /**
      * Processes one source record on its consumer thread.
      *
-     * @param record source record
+     * @param records source records
      * @param acknowledgment manual acknowledgment
      * @throws Exception when recovery publication is not confirmed
      */
@@ -121,7 +122,7 @@ public class ConnectorListener {
     private void processOne(ConsumerRecord<String, byte[]> record, MappedMessage mapped,
                             Acknowledgment acknowledgment, int index) throws Exception {
         try {
-            operations.execute(mapped);
+            operations.execute(mapped, correlation(record));
             // Future result publishing belongs here, with the source correlation and returned object.
             acknowledgment.acknowledge(index);
         } catch (RecordLinkageConflictException exception) {
@@ -168,7 +169,7 @@ public class ConnectorListener {
             try {
                 Thread.sleep(Math.min(Duration.ofSeconds(30).toMillis(),
                         properties.getRecovery().getInitialBackoff().toMillis() * (1L << Math.min(attempt - 1, 5))));
-                operations.execute(mapped);
+                operations.execute(mapped, correlation(record));
                 acknowledgment.acknowledge(index);
                 return;
             } catch (InterruptedException exception) {
@@ -180,5 +181,15 @@ public class ConnectorListener {
         }
         recovery.publishDlt(record, mapped, "TRANSIENT_OPERATION_FAILURE", attempts, failure);
         acknowledgment.acknowledge(index);
+    }
+
+    /**
+     * Builds a deterministic source correlation for bounded combined-stage replay.
+     *
+     * @param record source record
+     * @return source correlation
+     */
+    private String correlation(ConsumerRecord<String, byte[]> record) {
+        return record.topic() + "/" + record.partition() + "/" + record.offset();
     }
 }

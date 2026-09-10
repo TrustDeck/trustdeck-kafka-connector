@@ -26,6 +26,10 @@ import org.trustdeck.connector.kafka.config.ConnectorProperties;
 @Configuration
 public class TrustDeckClientConfiguration {
 
+    /** Creates client bean configuration. */
+    public TrustDeckClientConfiguration() {
+    }
+
     /**
      * Creates the shared resource client.
      *

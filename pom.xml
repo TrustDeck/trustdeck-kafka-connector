@@ -109,6 +109,13 @@
                     <failOnWarnings>true</failOnWarnings>
                     <excludePackageNames>org.trustdeck.connector.kafka.test</excludePackageNames>
                 </configuration>
+                <executions>
+                    <execution>
+                        <id>check-javadocs</id>
+                        <phase>verify</phase>
+                        <goals><goal>javadoc</goal></goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

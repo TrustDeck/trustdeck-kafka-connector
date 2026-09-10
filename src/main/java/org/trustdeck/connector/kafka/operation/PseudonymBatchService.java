@@ -18,6 +18,10 @@
 package org.trustdeck.connector.kafka.operation;
 
 import java.util.List;
+import java.util.ArrayDeque;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Queue;
 
 import org.springframework.stereotype.Service;
 import org.trustdeck.client.TrustDeckClient;
@@ -70,16 +74,44 @@ public class PseudonymBatchService {
         if (result.items().size() != messages.size()) {
             throw new IllegalStateException("Pseudonym batch response is partial or cannot be correlated safely.");
         }
+        Map<String, Queue<Integer>> occurrences = new HashMap<>();
         for (int index = 0; index < messages.size(); index++) {
-            Pseudonym returned = result.items().get(index);
-            MappedMessage source = messages.get(index);
-            if (returned == null || returned.getIdentifierItem() == null
-                    || !source.identifier().equals(returned.getIdentifierItem().getIdentifier())
-                    || !source.idType().equals(returned.getIdentifierItem().getIdType())
-                    || !source.psn().equals(returned.getPsn())) {
+            occurrences.computeIfAbsent(key(messages.get(index)), ignored -> new ArrayDeque<>()).add(index);
+        }
+        for (Pseudonym returned : result.items()) {
+            if (returned == null || returned.getIdentifierItem() == null) {
                 throw new IllegalStateException("Pseudonym batch response correlation is ambiguous.");
             }
+            Queue<Integer> indexes = occurrences.get(key(returned));
+            if (indexes == null || indexes.isEmpty()) {
+                throw new IllegalStateException("Pseudonym batch response correlation is ambiguous.");
+            }
+            indexes.remove();
+        }
+        if (occurrences.values().stream().anyMatch(queue -> !queue.isEmpty())) {
+            throw new IllegalStateException("Pseudonym batch response omitted an input record.");
         }
         return result.items();
+    }
+
+    /**
+     * Builds an occurrence-matching key from returned complete identifying fields.
+     *
+     * @param pseudonym pseudonym value
+     * @return correlation key
+     */
+    private String key(Pseudonym pseudonym) {
+        return pseudonym.getIdentifierItem().getIdentifier() + "\u0000"
+                + pseudonym.getIdentifierItem().getIdType() + "\u0000" + pseudonym.getPsn();
+    }
+
+    /**
+     * Builds an occurrence-matching key from source fields.
+     *
+     * @param message mapped source
+     * @return correlation key
+     */
+    private String key(MappedMessage message) {
+        return message.identifier() + "\u0000" + message.idType() + "\u0000" + message.psn();
     }
 }

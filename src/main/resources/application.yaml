@@ -26,6 +26,18 @@ spring:
       ssl.truststore.type: ${KAFKA_TRUSTSTORE_TYPE:JKS}
   jackson:
     default-property-inclusion: non_null
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:25}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${SMTP_STARTTLS:false}
+      mail.smtp.ssl.enable: ${SMTP_SSL_ENABLE:false}
+      mail.smtp.connectiontimeout: ${SMTP_CONNECTION_TIMEOUT:5000}
+      mail.smtp.timeout: ${SMTP_READ_TIMEOUT:10000}
+      mail.smtp.writetimeout: ${SMTP_WRITE_TIMEOUT:10000}
 
 server:
   port: ${HEALTH_PORT:8080}
@@ -41,20 +53,6 @@ management:
       probes:
         enabled: true
       show-details: never
-
-spring:
-  mail:
-    host: ${SMTP_HOST:}
-    port: ${SMTP_PORT:25}
-    username: ${SMTP_USERNAME:}
-    password: ${SMTP_PASSWORD:}
-    properties:
-      mail.smtp.auth: ${SMTP_AUTH:false}
-      mail.smtp.starttls.enable: ${SMTP_STARTTLS:false}
-      mail.smtp.ssl.enable: ${SMTP_SSL_ENABLE:false}
-      mail.smtp.connectiontimeout: ${SMTP_CONNECTION_TIMEOUT:5000}
-      mail.smtp.timeout: ${SMTP_READ_TIMEOUT:10000}
-      mail.smtp.writetimeout: ${SMTP_WRITE_TIMEOUT:10000}
 
 connector:
   operation: ${TRUSTDECK_OPERATION}

@@ -41,10 +41,15 @@ import org.trustdeck.connector.kafka.config.ConnectorProperties;
 @Configuration
 public class KafkaConfiguration {
 
+    /** Creates Kafka bean configuration. */
+    public KafkaConfiguration() {
+    }
+
     /**
      * Creates a byte-preserving source consumer factory.
      *
      * @param kafkaProperties Spring Kafka settings
+     * @param environment environment values
      * @return consumer factory
      */
     @Bean
@@ -78,6 +83,7 @@ public class KafkaConfiguration {
      * Creates the byte-preserving recovery producer.
      *
      * @param kafkaProperties Spring Kafka settings
+     * @param environment environment values
      * @return producer factory
      */
     @Bean

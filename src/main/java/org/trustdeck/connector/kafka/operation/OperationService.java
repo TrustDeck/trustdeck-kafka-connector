@@ -18,6 +18,9 @@
 package org.trustdeck.connector.kafka.operation;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
@@ -39,6 +42,14 @@ public class OperationService {
     /** Connector operation settings. */
     private final ConnectorProperties properties;
 
+    /** Bounded completed first stages for combined-operation retries. */
+    private final Map<String, UUID> combinedStages = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, UUID> eldest) {
+            return size() > 10_000;
+        }
+    };
+
     /**
      * Creates the operation service.
      *
@@ -57,6 +68,17 @@ public class OperationService {
      * @return returned TrustDeck object, when one exists
      */
     public Object execute(MappedMessage message) {
+        return execute(message, null);
+    }
+
+    /**
+     * Executes one operation and uses a source correlation for combined-stage replay.
+     *
+     * @param message mapped input
+     * @param correlation stable source topic/partition/offset correlation, or null
+     * @return returned TrustDeck object
+     */
+    public Object execute(MappedMessage message, String correlation) {
         return switch (properties.getOperation()) {
             case "CREATE_PSEUDONYM" -> createPseudonym(message);
             case "UPDATE_PSEUDONYM" -> updatePseudonym(message);
@@ -64,7 +86,7 @@ public class OperationService {
             case "CREATE_ENTITY" -> createEntity(message);
             case "UPDATE_ENTITY" -> updateEntity(message);
             case "DELETE_ENTITY" -> deleteEntity(message);
-            case "CREATE_ENTITY_AND_PSEUDONYM" -> createEntityAndPseudonym(message);
+            case "CREATE_ENTITY_AND_PSEUDONYM" -> createEntityAndPseudonym(message, correlation);
             default -> throw new IllegalStateException("Unsupported connector operation.");
         };
     }
@@ -157,12 +179,33 @@ public class OperationService {
      * @param message mapped input
      * @return created target pseudonym
      */
-    private Pseudonym createEntityAndPseudonym(MappedMessage message) {
-        Entity entity = createEntity(message);
-        if (entity == null || entity.getTrustdeckID() == null) {
-            throw new IllegalStateException("Entity creation returned no TrustDeck UUID.");
+    private Pseudonym createEntityAndPseudonym(MappedMessage message, String correlation) {
+        UUID entityId;
+        synchronized (combinedStages) {
+            entityId = correlation == null ? null : combinedStages.get(correlation);
         }
-        Pseudonym pseudonym = pseudonym(entity.getTrustdeckID().toString(), "TrustDeckID", message.psn(),
+        if (entityId == null) {
+            Entity entity = createEntity(message);
+            if (entity == null || entity.getTrustdeckID() == null) {
+                throw new IllegalStateException("Entity creation returned no TrustDeck UUID.");
+            }
+            entityId = entity.getTrustdeckID();
+            if (correlation != null) {
+                synchronized (combinedStages) {
+                    combinedStages.put(correlation, entityId);
+                }
+            }
+        }
+
+        // The associated-domain read verifies backend automatic pseudonymization before creating a target value.
+        List<Pseudonym> associated = client.entities(properties.getTrustdeck().getProject(), message.entityType())
+                .getPseudonyms(entityId).items();
+        for (Pseudonym existing : associated) {
+            if (message.domain().equals(existing.getDomainName())) {
+                return existing;
+            }
+        }
+        Pseudonym pseudonym = pseudonym(entityId.toString(), "TrustDeckID", message.psn(),
                 message.validFrom(), message.validTo());
         return client.pseudonyms(message.domain()).create(pseudonym, false);
     }

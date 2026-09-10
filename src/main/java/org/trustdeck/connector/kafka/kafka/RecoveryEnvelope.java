@@ -19,7 +19,24 @@ package org.trustdeck.connector.kafka.kafka;
 
 import java.time.Instant;
 
-/** Versioned, replayable recovery record without credentials or arbitrary headers. */
+/** Versioned, replayable recovery record without credentials or arbitrary headers.
+ * @param schemaVersion envelope schema version
+ * @param status terminal status
+ * @param sourceTopic source topic
+ * @param partition source partition
+ * @param offset source offset
+ * @param sourceTimestamp source timestamp
+ * @param operation operation name
+ * @param resolvedTarget resolved target
+ * @param failureCategory safe failure category
+ * @param httpStatus HTTP status when available
+ * @param attempts attempt count
+ * @param completedStage completed combined-operation stage
+ * @param completedUuid completed entity UUID
+ * @param keyBase64 original key
+ * @param valueBase64 original value
+ * @param username source user
+ */
 public record RecoveryEnvelope(String schemaVersion, String status, String sourceTopic, int partition,
                                long offset, Instant sourceTimestamp, String operation, String resolvedTarget,
                                String failureCategory, Integer httpStatus, int attempts,

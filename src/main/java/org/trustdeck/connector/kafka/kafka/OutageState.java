@@ -25,6 +25,10 @@ import org.springframework.stereotype.Component;
 @Component
 public class OutageState {
 
+    /** Creates initially healthy connector state. */
+    public OutageState() {
+    }
+
     /** Current paused state. */
     private final AtomicBoolean paused = new AtomicBoolean();
 

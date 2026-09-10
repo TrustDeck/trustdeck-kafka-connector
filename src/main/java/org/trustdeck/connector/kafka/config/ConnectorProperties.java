@@ -33,6 +33,10 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "connector")
 public class ConnectorProperties {
 
+    /** Creates empty settings for Spring property binding. */
+    public ConnectorProperties() {
+    }
+
     /** Selected operation processed by this application instance. */
     @NotBlank
     private String operation;
@@ -88,6 +92,9 @@ public class ConnectorProperties {
     /** TrustDeck connection and fixed resource target settings. */
     @Data
     public static class TrustDeckProperties {
+        /** Creates empty TrustDeck settings for property binding. */
+        public TrustDeckProperties() {
+        }
         /** TrustDeck service base URL. */
         @NotBlank
         private String serviceUrl;
@@ -114,6 +121,9 @@ public class ConnectorProperties {
     /** Explicit JSON Pointer mappings and timestamp rules. */
     @Data
     public static class MappingProperties {
+        /** Creates empty mapping settings for property binding. */
+        public MappingProperties() {
+        }
         /** Constant domain override. */
         private String domainConstant;
 
@@ -182,6 +192,9 @@ public class ConnectorProperties {
     /** One explicit source-to-target mapping for entity data or identifiers. */
     @Data
     public static class FieldMapping {
+        /** Creates an empty field mapping for property binding. */
+        public FieldMapping() {
+        }
         /** Source JSON Pointer or bare top-level field. */
         @NotBlank
         private String sourcePath;
@@ -200,6 +213,9 @@ public class ConnectorProperties {
     /** DLT/review topics and bounded recovery behavior. */
     @Data
     public static class RecoveryProperties {
+        /** Creates empty recovery settings for property binding. */
+        public RecoveryProperties() {
+        }
         /** Dead-letter topic. */
         private String dltTopic;
 
