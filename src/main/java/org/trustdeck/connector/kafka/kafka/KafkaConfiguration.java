@@ -53,11 +53,11 @@ public class KafkaConfiguration {
      * @return consumer factory
      */
     @Bean
-    public ConsumerFactory<String, byte[]> consumerFactory(KafkaProperties kafkaProperties, Environment environment) {
+    public ConsumerFactory<byte[], byte[]> consumerFactory(KafkaProperties kafkaProperties, Environment environment) {
         Map<String, Object> settings = kafkaProperties.buildConsumerProperties();
         settings.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         addJaasCredentials(settings, environment);
-        return new DefaultKafkaConsumerFactory<>(settings, new StringDeserializer(), new ByteArrayDeserializer());
+        return new DefaultKafkaConsumerFactory<>(settings, new ByteArrayDeserializer(), new ByteArrayDeserializer());
     }
 
     /**
@@ -68,9 +68,9 @@ public class KafkaConfiguration {
      * @return listener factory
      */
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, byte[]> kafkaListenerContainerFactory(
-            ConsumerFactory<String, byte[]> consumerFactory, ConnectorProperties properties) {
-        ConcurrentKafkaListenerContainerFactory<String, byte[]> factory = new ConcurrentKafkaListenerContainerFactory<>();
+    public ConcurrentKafkaListenerContainerFactory<byte[], byte[]> kafkaListenerContainerFactory(
+            ConsumerFactory<byte[], byte[]> consumerFactory, ConnectorProperties properties) {
+        ConcurrentKafkaListenerContainerFactory<byte[], byte[]> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setConcurrency(properties.getConcurrency());
         factory.getContainerProperties().setAckMode(AckMode.MANUAL_IMMEDIATE);

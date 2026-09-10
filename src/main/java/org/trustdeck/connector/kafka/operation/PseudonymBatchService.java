@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Queue;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.trustdeck.client.TrustDeckClient;
 import org.trustdeck.client.model.BatchResult;
@@ -41,15 +42,18 @@ public class PseudonymBatchService {
     /** Batch size setting. */
     private final ConnectorProperties properties;
 
-    /**
-     * Creates the batch service.
-     *
+    /** JSON serializer used for enforcing the wire-size limit. */
+    private final ObjectMapper mapper;
+
+    /** Creates the batch service with an application JSON mapper.
      * @param client TrustDeck client
      * @param properties connector settings
+     * @param mapper configured JSON mapper
      */
-    public PseudonymBatchService(TrustDeckClient client, ConnectorProperties properties) {
+    public PseudonymBatchService(TrustDeckClient client, ConnectorProperties properties, ObjectMapper mapper) {
         this.client = client;
         this.properties = properties;
+        this.mapper = mapper;
     }
 
     /**
@@ -70,6 +74,13 @@ public class PseudonymBatchService {
         List<Pseudonym> request = messages.stream().map(message -> Pseudonym.builder()
                 .identifierItem(IdentifierItem.builder().identifier(message.identifier()).idType(message.idType()).build())
                 .psn(message.psn()).validFrom(message.validFrom()).validTo(message.validTo()).build()).toList();
+        try {
+            if (mapper.writeValueAsBytes(request).length > properties.getBatchBytes()) {
+                throw new IllegalArgumentException("Pseudonym batch exceeds the configured byte limit.");
+            }
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            throw new IllegalArgumentException("Pseudonym batch cannot be serialized.", exception);
+        }
         BatchResult<Pseudonym> result = client.pseudonyms(domain).createBatch(request, false);
         if (result.items().size() != messages.size()) {
             throw new IllegalStateException("Pseudonym batch response is partial or cannot be correlated safely.");

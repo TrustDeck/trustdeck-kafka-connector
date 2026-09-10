@@ -53,6 +53,12 @@ management:
       probes:
         enabled: true
       show-details: never
+  health:
+    group:
+      readiness:
+        include: readinessState,connector
+      liveness:
+        include: livenessState
 
 connector:
   operation: ${TRUSTDECK_OPERATION}

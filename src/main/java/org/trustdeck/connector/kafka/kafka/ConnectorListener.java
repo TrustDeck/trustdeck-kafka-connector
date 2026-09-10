@@ -78,21 +78,19 @@ public class ConnectorListener {
      * @throws Exception when recovery publication is not confirmed
      */
     @KafkaListener(topics = "${connector.source-topic}", groupId = "${connector.group-id}")
-    public void onMessage(List<ConsumerRecord<String, byte[]>> records, Acknowledgment acknowledgment) throws Exception {
+    public void onMessage(List<ConsumerRecord<byte[], byte[]>> records, Acknowledgment acknowledgment) throws Exception {
         List<MappedMessage> mapped = new java.util.ArrayList<>();
         for (int index = 0; index < records.size(); index++) {
-            ConsumerRecord<String, byte[]> record = records.get(index);
+            ConsumerRecord<byte[], byte[]> record = records.get(index);
             if (record.value() == null || record.value().length > properties.getMaxRecordBytes()) {
                 recovery.publishDlt(record, null, "INVALID_RECORD", 0,
                         new MappingException("Kafka value is null or exceeds the configured size."));
-                acknowledgment.acknowledge(index);
-                mapped.add(null);
+            mapped.add(null);
             } else {
                 try {
                     mapped.add(mapper.map(record.value()));
                 } catch (MappingException exception) {
                     recovery.publishDlt(record, null, "INVALID_MAPPING", 0, exception);
-                    acknowledgment.acknowledge(index);
                     mapped.add(null);
                 }
             }
@@ -104,6 +102,7 @@ public class ConnectorListener {
         }
         for (int index = 0; index < records.size(); index++) {
             if (mapped.get(index) == null) {
+                acknowledgment.acknowledge(index);
                 continue;
             }
             processOne(records.get(index), mapped.get(index), acknowledgment, index);
@@ -119,7 +118,7 @@ public class ConnectorListener {
      * @param index record index
      * @throws Exception when recovery publication is not confirmed
      */
-    private void processOne(ConsumerRecord<String, byte[]> record, MappedMessage mapped,
+    private void processOne(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
                             Acknowledgment acknowledgment, int index) throws Exception {
         try {
             operations.execute(mapped, correlation(record));
@@ -143,7 +142,7 @@ public class ConnectorListener {
      * @param mapped mapped messages
      * @return true when response correlation is deterministic
      */
-    private boolean safeBatch(List<ConsumerRecord<String, byte[]>> records, List<MappedMessage> mapped) {
+    private boolean safeBatch(List<ConsumerRecord<byte[], byte[]>> records, List<MappedMessage> mapped) {
         if (records.isEmpty() || mapped.stream().anyMatch(java.util.Objects::isNull)) {
             return false;
         }
@@ -162,7 +161,7 @@ public class ConnectorListener {
      * @param acknowledgment manual acknowledgment
      * @throws Exception when DLT publication is not confirmed
      */
-    private void retryOrDlt(ConsumerRecord<String, byte[]> record, MappedMessage mapped,
+    private void retryOrDlt(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
                             Exception failure, Acknowledgment acknowledgment, int index) throws Exception {
         int attempts = properties.getRecovery().getMaxAttempts();
         for (int attempt = 1; attempt <= attempts; attempt++) {
@@ -189,7 +188,7 @@ public class ConnectorListener {
      * @param record source record
      * @return source correlation
      */
-    private String correlation(ConsumerRecord<String, byte[]> record) {
+    private String correlation(ConsumerRecord<byte[], byte[]> record) {
         return record.topic() + "/" + record.partition() + "/" + record.offset();
     }
 }
