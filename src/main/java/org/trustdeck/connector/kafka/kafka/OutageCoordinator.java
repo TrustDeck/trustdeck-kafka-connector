@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.trustdeck.client.TrustDeckClient;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
+import org.trustdeck.connector.kafka.notification.NotificationService;
 
 /** Pauses source containers during systemic backend failures and probes for recovery. */
 @Component
@@ -20,31 +21,39 @@ public class OutageCoordinator {
     private final KafkaListenerEndpointRegistry registry;
     private final TrustDeckClient client;
     private final ConnectorProperties properties;
+    private final NotificationService notifications;
 
     /** Creates the outage coordinator.
      * @param state shared outage state
      * @param registry listener containers
      * @param client authenticated client
      * @param properties connector settings
+     * @param notifications optional SMTP notifications
      */
     public OutageCoordinator(OutageState state, KafkaListenerEndpointRegistry registry,
-                             TrustDeckClient client, ConnectorProperties properties) {
+                             TrustDeckClient client, ConnectorProperties properties,
+                             NotificationService notifications) {
         this.state = state;
         this.registry = registry;
         this.client = client;
         this.properties = properties;
+        this.notifications = notifications;
     }
 
     /** Pauses every source container without acknowledging the current record.
      * @param reason sanitized outage category
      */
     public void pause(String reason) {
+        boolean alreadyPaused = state.isPaused();
         state.setPaused(true, reason);
         registry.getListenerContainers().forEach(container -> {
             if (!container.isContainerPaused()) {
                 container.pause();
             }
         });
+        if (!alreadyPaused) {
+            notifications.send("TrustDeck outage", "Consumption paused: " + reason);
+        }
     }
 
     /** Probes a configured read-only resource and resumes paused containers on success. */
@@ -70,6 +79,7 @@ public class OutageCoordinator {
                 }
             });
             state.setPaused(false, "");
+            notifications.send("TrustDeck recovered", "Authenticated read-only probe succeeded; consumption resumed.");
         } catch (RuntimeException ignored) {
             // Keep the source paused until an authenticated read-only probe succeeds.
         }

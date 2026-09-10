@@ -34,17 +34,29 @@ public class NotificationService {
     /** Recipient list. */
     private final List<String> recipients;
 
+    /** Optional sender address. */
+    private final String from;
+
+    /** Configured subject prefix. */
+    private final String subjectPrefix;
+
     /**
      * Creates a notification service.
      *
      * @param sender mail sender
      * @param recipients configured recipients
+     * @param from configured sender
+     * @param subjectPrefix configured subject prefix
      */
     public NotificationService(ObjectProvider<JavaMailSender> sender,
-                               @org.springframework.beans.factory.annotation.Value("${SMTP_TO:}") String recipients) {
+                               @org.springframework.beans.factory.annotation.Value("${SMTP_TO:}") String recipients,
+                               @org.springframework.beans.factory.annotation.Value("${SMTP_FROM:}") String from,
+                               @org.springframework.beans.factory.annotation.Value("${SUBJECT_PREFIX:[TrustDeck Kafka Connector]}") String subjectPrefix) {
         this.sender = sender;
         this.recipients = recipients == null ? List.of() : java.util.Arrays.stream(recipients.split(","))
                 .map(String::trim).filter(value -> !value.isBlank()).toList();
+        this.from = from;
+        this.subjectPrefix = subjectPrefix;
     }
 
     /**
@@ -60,7 +72,10 @@ public class NotificationService {
         try {
             SimpleMailMessage message = new SimpleMailMessage();
             message.setTo(recipients.toArray(String[]::new));
-            message.setSubject("[TrustDeck Kafka Connector] " + subject);
+            if (from != null && !from.isBlank()) {
+                message.setFrom(from);
+            }
+            message.setSubject((subjectPrefix == null ? "" : subjectPrefix) + " " + subject);
             message.setText(body);
             JavaMailSender mailSender = sender.getIfAvailable();
             if (mailSender != null) {
