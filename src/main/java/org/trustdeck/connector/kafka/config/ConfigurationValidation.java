@@ -19,6 +19,7 @@ package org.trustdeck.connector.kafka.config;
 
 import java.util.Locale;
 import java.util.Set;
+import java.net.URI;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
@@ -49,6 +50,12 @@ public class ConfigurationValidation {
             throw new IllegalArgumentException("connector.operation must be one of " + OPERATIONS);
         }
         properties.setOperation(operation);
+        requireHttpUrl(properties.getTrustdeck().getServiceUrl(), "trustdeck.service-url");
+        requireHttpUrl(properties.getTrustdeck().getTokenEndpoint(), "trustdeck.token-endpoint");
+        if (properties.getConnectTimeout().isZero() || properties.getConnectTimeout().isNegative()
+                || properties.getReadTimeout().isZero() || properties.getReadTimeout().isNegative()) {
+            throw new IllegalArgumentException("HTTP timeouts must be positive and finite.");
+        }
         if (blank(properties.getRecovery().getDltTopic())) {
             properties.getRecovery().setDltTopic(properties.getSourceTopic() + ".DLT");
         }
@@ -76,6 +83,14 @@ public class ConfigurationValidation {
                 && !operation.equals("DELETE_PSEUDONYM")) {
             throw new IllegalArgumentException("idTypePath is required for pseudonym create/update operations.");
         }
+        if (operation.equals("DELETE_PSEUDONYM") && blank(properties.getMapping().getPsnPath())
+                && (blank(properties.getMapping().getIdentifierPath()) || blank(properties.getMapping().getIdTypePath()))) {
+            throw new IllegalArgumentException("delete pseudonym needs psnPath or identifierPath and idTypePath.");
+        }
+        if (operation.equals("UPDATE_PSEUDONYM") && (blank(properties.getMapping().getOldIdentifierPath())
+                || blank(properties.getMapping().getOldIdTypePath()))) {
+            throw new IllegalArgumentException("update pseudonym requires old identifier and id type mappings.");
+        }
         if (operation.equals("CREATE_ENTITY") || operation.equals("UPDATE_ENTITY")
                 || operation.equals("DELETE_ENTITY") || operation.equals("CREATE_ENTITY_AND_PSEUDONYM")) {
             if (blank(properties.getTrustdeck().getProject())) {
@@ -95,5 +110,20 @@ public class ConfigurationValidation {
      */
     private static boolean blank(String text) {
         return text == null || text.isBlank();
+    }
+
+    /** Validates an endpoint without performing network I/O. */
+    private static void requireHttpUrl(String value, String name) {
+        if (blank(value)) {
+            throw new IllegalArgumentException(name + " must be an HTTP(S) URL.");
+        }
+        try {
+            URI uri = URI.create(value);
+            if (!Set.of("http", "https").contains(uri.getScheme()) || uri.getHost() == null) {
+                throw new IllegalArgumentException(name + " must be an HTTP(S) URL.");
+            }
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(name + " must be an HTTP(S) URL.", exception);
+        }
     }
 }
