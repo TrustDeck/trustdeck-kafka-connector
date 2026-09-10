@@ -130,6 +130,7 @@ This checklist is maintained against the complete approved scope, not just compi
 ### Implemented but not verified
 
 - Pseudonym batch request construction, byte limit enforcement, and occurrence-aware response matching.
+- Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses remain unacknowledged for redelivery.
 - Combined entity/pseudonym dispatch with bounded in-memory completed-stage state.
 - Batch Kafka listener wiring, byte-preserving recovery envelope serialization, readiness/liveness groups, outage pause/probe/resume coordinator, and notification bean wiring.
 - Docker builder path for the pinned client development commit, verified with Docker daemon.
@@ -137,12 +138,12 @@ This checklist is maintained against the complete approved scope, not just compi
 
 ### Missing or incomplete
 
-- Partial-batch fallback/outcomes, retry-after handling, and producer-outage classification.
+- Retry-after handling, producer-outage classification, and explicit terminal handling for unsafe batch outcomes.
 - Outage notification integration and full authenticated preflight/resource checks.
 - Recovery safe-header allowlist, full target identity, and combined stage/UUID propagation.
 - Complete delete-pseudonym ambiguity lookup, update selector validation, and operation-specific configuration/target-path validation.
 - Combined associated-pseudonym verification, durable/replayable stage handling, and all seven-operation HTTP contract coverage.
-- Meaningful Kafka/restart/producer-failure/outage/offset integration tests, partial 206 tests, token refresh tests, HTTP health endpoint tests, and SMTP suppression tests.
+- Meaningful Kafka/restart/producer-failure/outage/offset integration tests, unsafe partial 206 tests, token refresh tests, HTTP health endpoint tests, and SMTP suppression tests.
 - Dependency/license report and complete operation-specific environment documentation.
 
 ### Blocked
