@@ -1,0 +1,18 @@
+services:
+  trustdeck-kafka-connector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: trustdeck-kafka-connector:1.0.0
+    restart: unless-stopped
+    stop_grace_period: 45s
+    env_file:
+      - .env
+    environment:
+      TZ: UTC
+      SPRING_CONFIG_ADDITIONAL_LOCATION: optional:file:/app/config/
+    volumes:
+      - ./config/instance/application.yaml:/app/config/application.yaml:ro
+      - ./config/instance/truststores:/app/truststores:ro
+    ports:
+      - "${HEALTH_HOST_PORT:-18080}:8080"

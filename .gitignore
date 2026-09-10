@@ -1,0 +1,14 @@
+.env
+*.env
+*.key
+*.pem
+*.p12
+*.jks
+*.truststore
+*.log
+target/
+.idea/
+.vscode/
+*.iml
+docker-compose.override.local.yml
+config/local/

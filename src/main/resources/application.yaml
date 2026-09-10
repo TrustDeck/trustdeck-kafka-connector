@@ -1,0 +1,103 @@
+spring:
+  application:
+    name: trustdeck-kafka-connector
+  main:
+    web-application-type: servlet
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    consumer:
+      group-id: ${KAFKA_GROUP_ID}
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+      max-poll-records: ${KAFKA_MAX_POLL_RECORDS:100}
+      max-partition-fetch-bytes: ${KAFKA_MAX_PARTITION_FETCH_BYTES:1048576}
+      properties:
+        max.poll.interval.ms: ${KAFKA_MAX_POLL_INTERVAL_MS:300000}
+    producer:
+      acks: all
+      properties:
+        max.request.size: ${KAFKA_MAX_REQUEST_SIZE:1048576}
+    properties:
+      security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_SSL}
+      sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
+      sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
+      ssl.truststore.location: ${KAFKA_TRUSTSTORE_LOCATION:}
+      ssl.truststore.password: ${KAFKA_TRUSTSTORE_PASSWORD:}
+      ssl.truststore.type: ${KAFKA_TRUSTSTORE_TYPE:JKS}
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: ${HEALTH_PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+spring:
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:25}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${SMTP_STARTTLS:false}
+      mail.smtp.ssl.enable: ${SMTP_SSL_ENABLE:false}
+      mail.smtp.connectiontimeout: ${SMTP_CONNECTION_TIMEOUT:5000}
+      mail.smtp.timeout: ${SMTP_READ_TIMEOUT:10000}
+      mail.smtp.writetimeout: ${SMTP_WRITE_TIMEOUT:10000}
+
+connector:
+  operation: ${TRUSTDECK_OPERATION}
+  source-topic: ${KAFKA_TOPIC}
+  group-id: ${KAFKA_GROUP_ID}
+  max-record-bytes: ${KAFKA_MAX_RECORD_BYTES:1048576}
+  max-poll-records: ${KAFKA_MAX_POLL_RECORDS:100}
+  concurrency: ${KAFKA_CONCURRENCY:2}
+  batch-size: ${TRUSTDECK_BATCH_SIZE:100}
+  batch-bytes: ${TRUSTDECK_BATCH_BYTES:262144}
+  connect-timeout: ${TRUSTDECK_CONNECT_TIMEOUT:5s}
+  read-timeout: ${TRUSTDECK_READ_TIMEOUT:30s}
+  trustdeck:
+    service-url: ${TRUSTDECK_SERVICE_URL}
+    token-endpoint: ${KEYCLOAK_TOKEN_ENDPOINT}
+    client-id: ${KEYCLOAK_CLIENT_ID}
+    client-secret: ${KEYCLOAK_CLIENT_SECRET}
+    project: ${TRUSTDECK_PROJECT:}
+    entity-type: ${TRUSTDECK_ENTITY_TYPE:}
+  mapping:
+    domain-constant: ${TRUSTDECK_DOMAIN:}
+    domain-path: ${KAFKA_MESSAGE_SOURCE_SYSTEM_DESCRIPTOR:}
+    identifier-path: ${KAFKA_MESSAGE_IDENTIFIER_DESCRIPTOR:}
+    id-type-path: ${KAFKA_MESSAGE_IDTYPE_DESCRIPTOR:}
+    psn-path: ${KAFKA_MESSAGE_PSN_DESCRIPTOR:}
+    valid-from-path: ${KAFKA_MESSAGE_VALID_FROM_DESCRIPTOR:}
+    valid-to-path: ${KAFKA_MESSAGE_VALID_TO_DESCRIPTOR:}
+    username-path: ${KAFKA_MESSAGE_USERNAME_DESCRIPTOR:}
+    entity-type-path: ${KAFKA_MESSAGE_ENTITY_TYPE_DESCRIPTOR:}
+    entity-id-path: ${KAFKA_MESSAGE_ENTITY_ID_DESCRIPTOR:}
+    old-identifier-path: ${KAFKA_MESSAGE_OLD_IDENTIFIER_DESCRIPTOR:}
+    old-id-type-path: ${KAFKA_MESSAGE_OLD_IDTYPE_DESCRIPTOR:}
+    old-psn-path: ${KAFKA_MESSAGE_OLD_PSN_DESCRIPTOR:}
+    new-identifier-path: ${KAFKA_MESSAGE_NEW_IDENTIFIER_DESCRIPTOR:}
+    new-id-type-path: ${KAFKA_MESSAGE_NEW_IDTYPE_DESCRIPTOR:}
+    new-psn-path: ${KAFKA_MESSAGE_NEW_PSN_DESCRIPTOR:}
+    old-domain-path: ${KAFKA_MESSAGE_OLD_DOMAIN_DESCRIPTOR:}
+    new-domain-path: ${KAFKA_MESSAGE_NEW_DOMAIN_DESCRIPTOR:}
+    source-timezone: ${MAPPING_SOURCE_TIMEZONE:UTC}
+    datetime-format: ${MAPPING_DATETIME_FORMAT:}
+  recovery:
+    dlt-topic: ${KAFKA_DLT_TOPIC:}
+    review-topic: ${KAFKA_REVIEW_TOPIC:}
+    max-attempts: ${RECOVERY_MAX_ATTEMPTS:3}
+    initial-backoff: ${RECOVERY_INITIAL_BACKOFF:1s}
+    probe-interval: ${RECOVERY_PROBE_INTERVAL:15s}
