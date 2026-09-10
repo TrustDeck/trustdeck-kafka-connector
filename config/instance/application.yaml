@@ -1,0 +1,2 @@
+# Optional per-instance overrides. Keep secrets in .env, not in this file.
+# The classpath application.yaml provides the generic defaults.
