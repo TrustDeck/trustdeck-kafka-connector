@@ -51,6 +51,9 @@ public class ConnectorListener {
     /** Safe pseudonym create batch coordinator. */
     private final PseudonymBatchService batches;
 
+    /** Systemic failure pause coordinator. */
+    private final OutageCoordinator outage;
+
     /**
      * Creates the listener.
      *
@@ -59,15 +62,17 @@ public class ConnectorListener {
      * @param recovery recovery publisher
      * @param properties connector settings
      * @param batches pseudonym batch service
+     * @param outage outage coordinator
      */
     public ConnectorListener(JsonMessageMapper mapper, OperationService operations,
-                             RecoveryPublisher recovery, ConnectorProperties properties,
-                             PseudonymBatchService batches) {
+                              RecoveryPublisher recovery, ConnectorProperties properties,
+                              PseudonymBatchService batches, OutageCoordinator outage) {
         this.mapper = mapper;
         this.operations = operations;
         this.recovery = recovery;
         this.properties = properties;
         this.batches = batches;
+        this.outage = outage;
     }
 
     /**
@@ -163,6 +168,10 @@ public class ConnectorListener {
      */
     private void retryOrDlt(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
                             Exception failure, Acknowledgment acknowledgment, int index) throws Exception {
+        if (systemic(failure)) {
+            outage.pause(category(failure));
+            throw failure;
+        }
         int attempts = properties.getRecovery().getMaxAttempts();
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
@@ -174,12 +183,38 @@ public class ConnectorListener {
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 throw exception;
-            } catch (Exception ignored) {
-                // Preserve the original failure category if all bounded attempts fail.
+            } catch (Exception retryFailure) {
+                failure = retryFailure;
+                if (systemic(retryFailure)) {
+                    outage.pause(category(retryFailure));
+                    throw retryFailure;
+                }
             }
         }
-        recovery.publishDlt(record, mapped, "TRANSIENT_OPERATION_FAILURE", attempts, failure);
+        recovery.publishDlt(record, mapped, category(failure), attempts, failure);
         acknowledgment.acknowledge(index);
+    }
+
+    /** Identifies backend/authentication failures that must not be drained to recovery topics. */
+    private boolean systemic(Exception failure) {
+        if (failure instanceof org.trustdeck.client.exception.TrustDeckResponseException response) {
+            return response.getStatusCode() == 401 || response.getStatusCode() == 403
+                    || response.getStatusCode() >= 500;
+        }
+        return failure instanceof java.net.ConnectException
+                || failure instanceof java.net.SocketTimeoutException
+                || failure instanceof java.io.IOException
+                || failure.getCause() instanceof java.io.IOException;
+    }
+
+    /** Converts known failures to a safe recovery category. */
+    private String category(Exception failure) {
+        if (failure instanceof org.trustdeck.client.exception.TrustDeckResponseException response) {
+            return response.getStatusCode() == 401 || response.getStatusCode() == 403
+                    ? "AUTHORIZATION_FAILURE" : response.getStatusCode() >= 500
+                    ? "BACKEND_UNAVAILABLE" : "TRANSIENT_OPERATION_FAILURE";
+        }
+        return systemic(failure) ? "BACKEND_UNAVAILABLE" : "TRANSIENT_OPERATION_FAILURE";
     }
 
     /**
