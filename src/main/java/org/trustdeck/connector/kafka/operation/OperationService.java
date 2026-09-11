@@ -101,7 +101,10 @@ public class OperationService {
         }
     }
 
-    /** Restores a confirmed combined-operation stage for an explicitly initiated replay. */
+    /** Restores a confirmed combined-operation stage for an explicitly initiated replay.
+     * @param correlation source correlation
+     * @param completedUuid confirmed entity UUID
+     */
     public void restoreCompletedUuid(String correlation, UUID completedUuid) {
         if (correlation == null || completedUuid == null) {
             throw new IllegalArgumentException("Replay stage correlation and UUID are required.");

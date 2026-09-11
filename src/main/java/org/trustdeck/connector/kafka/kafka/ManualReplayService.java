@@ -22,7 +22,11 @@ public class ManualReplayService {
     private final OperationService operations;
     private final ConnectorProperties properties;
 
-    /** Creates the replay service. */
+    /** Creates the replay service.
+     * @param mapper source mapper
+     * @param operations operation dispatcher
+     * @param properties connector settings
+     */
     public ManualReplayService(JsonMessageMapper mapper, OperationService operations, ConnectorProperties properties) {
         this.mapper = mapper;
         this.operations = operations;
