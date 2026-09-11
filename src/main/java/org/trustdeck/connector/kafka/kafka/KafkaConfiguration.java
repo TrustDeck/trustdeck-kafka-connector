@@ -27,6 +27,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
@@ -65,17 +66,20 @@ public class KafkaConfiguration {
      *
      * @param consumerFactory source consumer factory
      * @param properties connector settings
+     * @param autoStartup whether listeners start with the application
      * @return listener factory
      */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<byte[], byte[]> kafkaListenerContainerFactory(
-            ConsumerFactory<byte[], byte[]> consumerFactory, ConnectorProperties properties) {
+            ConsumerFactory<byte[], byte[]> consumerFactory, ConnectorProperties properties,
+            @Value("${spring.kafka.listener.auto-startup:true}") boolean autoStartup) {
         ConcurrentKafkaListenerContainerFactory<byte[], byte[]> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setConcurrency(properties.getConcurrency());
         factory.getContainerProperties().setAckMode(AckMode.MANUAL_IMMEDIATE);
         factory.getContainerProperties().setMissingTopicsFatal(true);
         factory.setBatchListener(true);
+        factory.setAutoStartup(autoStartup);
         return factory;
     }
 
