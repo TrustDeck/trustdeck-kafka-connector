@@ -91,6 +91,16 @@ public class OperationService {
         };
     }
 
+    /** Returns the bounded completed entity stage for replay metadata.
+     * @param correlation source topic/partition/offset correlation
+     * @return completed entity UUID, or null
+     */
+    public UUID completedUuid(String correlation) {
+        synchronized (combinedStages) {
+            return combinedStages.get(correlation);
+        }
+    }
+
     /**
      * Creates a pseudonym and forwards only supplied validity values.
      *

@@ -106,8 +106,14 @@ public class ConnectorListener {
             } catch (Exception failure) {
                 if (systemic(failure)) {
                     outage.pause(category(failure));
+                    throw failure;
                 }
-                throw failure;
+                for (int index = 0; index < records.size(); index++) {
+                    recovery.publishUnknown(records.get(index), mapped.get(index), failure,
+                            operations.completedUuid(correlation(records.get(index))));
+                    acknowledgment.acknowledge(index);
+                }
+                return;
             }
             acknowledgment.acknowledge();
             return;

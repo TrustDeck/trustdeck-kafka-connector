@@ -123,14 +123,14 @@ This checklist is maintained against the complete approved scope, not just compi
 - Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, instance template, and baseline documentation.
 - Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
 - TrustDeck client adapter with OAuth client-credentials token caching and finite connect/read timeout configuration.
-- Basic HTTP operation dispatch and mapper/listener tests; `./mvnw clean verify` currently passes 9 tests.
+- Basic HTTP operation dispatch and mapper/listener/batch tests; `./mvnw clean verify` currently passes 10 tests.
 - Strict Javadocs, `git diff --check`, Compose config validation, Docker build, isolated container liveness/readiness probes, and client `mvn clean verify` pass.
 - Client timeout change is isolated on `feature/http-timeouts`, commit `5ca64d7`, with the client test suite previously passing 73 tests.
 
 ### Implemented but not verified
 
 - Pseudonym batch request construction, byte limit enforcement, and occurrence-aware response matching.
-- Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses remain unacknowledged for redelivery.
+- Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses are being changed to confirmed `UNKNOWN_OUTCOME` recovery publication.
 - Combined entity/pseudonym dispatch with bounded in-memory completed-stage state.
 - Batch Kafka listener wiring, byte-preserving recovery envelope serialization, readiness/liveness groups, outage pause/probe/resume coordinator, and notification bean wiring.
 - Docker builder path for the pinned client development commit, verified with Docker daemon.
@@ -138,7 +138,7 @@ This checklist is maintained against the complete approved scope, not just compi
 
 ### Missing or incomplete
 
-- Retry-after handling, producer-outage classification, and explicit terminal handling for unsafe batch outcomes.
+- Retry-after handling, producer-outage classification, and verification of terminal handling for unsafe batch outcomes.
 - Outage notification integration and full authenticated preflight/resource checks.
 - Recovery safe-header allowlist, full target identity, and combined stage/UUID propagation.
 - Complete delete-pseudonym ambiguity lookup, update selector validation, and operation-specific configuration/target-path validation.
@@ -153,7 +153,7 @@ This checklist is maintained against the complete approved scope, not just compi
 
 ### Next concrete action
 
-Fix all remaining strict Javadoc diagnostics, commit the current coherent mapping/Kafka/batch chunk, then implement partition-safe outcomes and systemic outage pause/resume before expanding integration coverage.
+Add terminal unknown-outcome publication and combined-stage metadata to recovery handling, then verify producer failure and partition offset behavior with broker-backed tests.
 
 ## Proposed Commits
 

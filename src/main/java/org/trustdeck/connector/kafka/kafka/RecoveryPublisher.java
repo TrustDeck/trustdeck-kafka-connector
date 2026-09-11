@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.Map;
 import java.util.Set;
 import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -90,6 +91,21 @@ public class RecoveryPublisher {
                 properties.getRecovery().getReviewTopic());
     }
 
+    /** Publishes a confirmed terminal envelope for an unsafe external batch outcome.
+     * @param record source record
+     * @param mapped mapped target
+     * @param failure operation failure
+     * @param completedUuid completed combined-operation entity UUID
+     * @throws Exception when broker confirmation fails
+     */
+    public void publishUnknown(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
+                               Throwable failure, UUID completedUuid) throws Exception {
+        publish(record, mapped, "UNKNOWN_OUTCOME", "UNKNOWN_OUTCOME", 1, failure,
+                properties.getRecovery().getDltTopic(),
+                completedUuid == null ? null : "Entity stage completed; reconcile the preserved UUID before replaying stage two.",
+                completedUuid);
+    }
+
     /**
      * Serializes and confirms one envelope.
      *
@@ -105,11 +121,26 @@ public class RecoveryPublisher {
     private void publish(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
                          String category, String status, int attempts, Throwable failure,
                          String topic) throws Exception {
+        publish(record, mapped, category, status, attempts, failure, topic, null);
+    }
+
+    /** Serializes and confirms one envelope with optional operator guidance. */
+    private void publish(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
+                         String category, String status, int attempts, Throwable failure,
+                         String topic, String manualGuidance) throws Exception {
+        publish(record, mapped, category, status, attempts, failure, topic, manualGuidance, null);
+    }
+
+    /** Serializes and confirms one envelope with combined-operation metadata. */
+    private void publish(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
+                         String category, String status, int attempts, Throwable failure,
+                         String topic, String manualGuidance, UUID completedUuid) throws Exception {
         RecoveryEnvelope envelope = new RecoveryEnvelope("1", status, record.topic(), record.partition(),
                 record.offset(), record.timestamp() < 0 ? null : java.time.Instant.ofEpochMilli(record.timestamp()),
                 properties.getOperation(), mapped == null ? null : mapped.domain(), category, httpStatus(failure), attempts,
-                null, null, record.key() == null ? null : Base64.getEncoder().encodeToString(record.key()),
-                Base64.getEncoder().encodeToString(record.value()), mapped == null ? null : mapped.username(), safeHeaders(record));
+                completedUuid == null ? null : "ENTITY_CREATED", completedUuid == null ? null : completedUuid.toString(),
+                record.key() == null ? null : Base64.getEncoder().encodeToString(record.key()),
+                Base64.getEncoder().encodeToString(record.value()), mapped == null ? null : mapped.username(), safeHeaders(record), manualGuidance);
         String json = mapper.writeValueAsString(envelope);
         String key = record.key() == null ? null : Base64.getEncoder().encodeToString(record.key());
         template.send(topic, key, json).get(Duration.ofSeconds(10).toMillis(), TimeUnit.MILLISECONDS);
