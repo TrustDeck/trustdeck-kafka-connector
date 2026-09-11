@@ -123,27 +123,27 @@ This checklist is maintained against the complete approved scope, not just compi
 - Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, instance template, and baseline documentation.
 - Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
 - TrustDeck client adapter with OAuth client-credentials token caching and finite connect/read timeout configuration.
-- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration tests bring `./mvnw clean verify` to 18 passing tests.
+- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health tests plus disposable Kafka and recovery publisher tests bring the clean verification suite to 22 passing tests.
 - Strict Javadocs, `git diff --check`, Compose config validation, Docker build, isolated container liveness/readiness probes, and client `mvn clean verify` pass.
 - Client timeout change is isolated on `feature/http-timeouts`, commit `5ca64d7`, with the client test suite previously passing 73 tests.
 
 ### Implemented but not verified
 
 - Pseudonym batch request construction, byte limit enforcement, and occurrence-aware response matching.
-- Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses publish confirmed `UNKNOWN_OUTCOME` envelopes with bounded guidance.
-- Combined entity/pseudonym dispatch with bounded in-memory completed-stage state.
-- Batch Kafka listener wiring, byte-preserving recovery envelope serialization, readiness/liveness groups, outage pause/probe/resume coordinator, and notification bean wiring.
+- Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses publish `UNKNOWN_OUTCOME` envelopes with bounded guidance, but publisher failure and broker-offset behavior remain unverified.
+- Combined entity/pseudonym dispatch with bounded in-memory completed-stage state and confirmed recovery UUID fields.
+- Batch Kafka listener wiring, byte-preserving recovery envelope serialization, readiness/liveness groups, outage pause/probe/resume coordinator, and notification integration.
 - Docker builder path for the pinned client development commit, verified with Docker daemon.
 - Strict Javadoc execution and current handwritten declaration documentation.
 
 ### Missing or incomplete
 
 - Retry-after handling, producer-outage classification, and verification of terminal handling for unsafe batch outcomes.
-- Outage notification integration and full authenticated preflight/resource checks.
-- Recovery full target identity, complete safe-header assertions, and stage/UUID replay execution.
-- Complete delete-pseudonym ambiguity lookup, update selector validation, and operation-specific configuration/target-path validation.
-- Combined associated-pseudonym verification assertions, durable/replayable stage handling, and exact path/payload assertions for all seven HTTP operations.
-- Meaningful Kafka/Testcontainers restart/producer-failure/outage/offset integration tests, unsafe partial 206 tests, token refresh tests, HTTP health endpoint tests, and SMTP suppression tests.
+- Full authenticated static/dynamic preflight/resource checks and retry-after handling.
+- Recovery producer-failure tests, full target identity, and replay execution from stage/UUID metadata.
+- Meaningful Kafka/Testcontainers restart/producer-failure/outage/offset integration tests and unsafe partial 206 tests. A disposable Kafka round-trip now proves isolated broker creation and source byte transport.
+- Token-expiry/refresh and SMTP cooldown/failure tests.
+- Exact HTTP path/payload assertions, ambiguous-read/linkage-conflict tests, and target-path validation tests.
 - Dependency/license report and complete operation-specific environment documentation.
 
 ### Blocked
@@ -151,9 +151,21 @@ This checklist is maintained against the complete approved scope, not just compi
 - Live backend permission preflight and end-to-end TrustDeck verification are blocked until isolated synthetic development credentials/resources are available.
 - Disposable Kafka and Docker runtime checks are blocked if the local Docker daemon is unavailable; this will be tested explicitly rather than using development services.
 
+### Requirement Evidence
+
+- Seven operations: implementation `OperationService`; behavioral test `OperationServiceHttpTest`; exact path/payload assertions are still missing.
+- Mapping/timezone: implementation `JsonMessageMapper`; behavioral test `JsonMessageMapperTest`; malformed-input breadth and target-path validation remain missing.
+- Batch/206: implementation `PseudonymBatchService`; behavioral test `PseudonymBatchServiceTest`; unsafe/reduced response and broker outcome tests remain missing.
+- Offsets/recovery: implementation `ConnectorListener`, `RecoveryPublisher`, and `RecoveryEnvelope`; behavioral tests `ConnectorListenerTest` and `RecoveryPublisherTest`; `KafkaResourceIntegrationTest` proves disposable broker transport, but real broker commit/restart and producer-failure tests are missing.
+- Combined/replay: implementation `OperationService` and recovery metadata; no behavioral replay test exists yet.
+- Outage/health: implementation `OutageCoordinator` and `ConnectorHealthIndicator`; `HealthEndpointTest` proves HTTP endpoints, but pause/resume with a broker is untested.
+- Configuration: implementation `ConfigurationValidation`; behavioral test `ConfigurationValidationTest`; static/dynamic authenticated preflight is missing.
+- Client timeout/token: implementation sibling client commit `5ca64d7`; client suite proves timeout behavior and endpoint contracts, but connector token-expiry integration is missing.
+- SMTP: implementation `NotificationService`/`OutageCoordinator`; no suppression/failure behavioral test exists.
+
 ### Next concrete action
 
-Add broker-backed offset/restart tests and controlled health/token/SMTP tests; then implement exact replay execution from confirmed combined-stage envelopes.
+Add broker-backed offset/restart/producer-failure tests; then implement exact replay execution from confirmed combined-stage envelopes.
 
 ## Proposed Commits
 
