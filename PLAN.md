@@ -123,14 +123,14 @@ This checklist is maintained against the complete approved scope, not just compi
 - Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, instance template, and baseline documentation.
 - Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
 - TrustDeck client adapter with OAuth client-credentials token caching and finite connect/read timeout configuration.
-- Basic HTTP operation dispatch and mapper/listener/batch tests; `./mvnw clean verify` currently passes 10 tests.
+- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch tests bring `./mvnw clean verify` to 14 passing tests.
 - Strict Javadocs, `git diff --check`, Compose config validation, Docker build, isolated container liveness/readiness probes, and client `mvn clean verify` pass.
 - Client timeout change is isolated on `feature/http-timeouts`, commit `5ca64d7`, with the client test suite previously passing 73 tests.
 
 ### Implemented but not verified
 
 - Pseudonym batch request construction, byte limit enforcement, and occurrence-aware response matching.
-- Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses are being changed to confirmed `UNKNOWN_OUTCOME` recovery publication.
+- Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses publish confirmed `UNKNOWN_OUTCOME` envelopes with bounded guidance.
 - Combined entity/pseudonym dispatch with bounded in-memory completed-stage state.
 - Batch Kafka listener wiring, byte-preserving recovery envelope serialization, readiness/liveness groups, outage pause/probe/resume coordinator, and notification bean wiring.
 - Docker builder path for the pinned client development commit, verified with Docker daemon.
@@ -140,10 +140,10 @@ This checklist is maintained against the complete approved scope, not just compi
 
 - Retry-after handling, producer-outage classification, and verification of terminal handling for unsafe batch outcomes.
 - Outage notification integration and full authenticated preflight/resource checks.
-- Recovery safe-header allowlist, full target identity, and combined stage/UUID propagation.
+- Recovery full target identity, complete safe-header assertions, and stage/UUID replay execution.
 - Complete delete-pseudonym ambiguity lookup, update selector validation, and operation-specific configuration/target-path validation.
-- Combined associated-pseudonym verification, durable/replayable stage handling, and all seven-operation HTTP contract coverage.
-- Meaningful Kafka/restart/producer-failure/outage/offset integration tests, unsafe partial 206 tests, token refresh tests, HTTP health endpoint tests, and SMTP suppression tests.
+- Combined associated-pseudonym verification assertions, durable/replayable stage handling, and exact path/payload assertions for all seven HTTP operations.
+- Meaningful Kafka/Testcontainers restart/producer-failure/outage/offset integration tests, unsafe partial 206 tests, token refresh tests, HTTP health endpoint tests, and SMTP suppression tests.
 - Dependency/license report and complete operation-specific environment documentation.
 
 ### Blocked
@@ -153,7 +153,7 @@ This checklist is maintained against the complete approved scope, not just compi
 
 ### Next concrete action
 
-Add terminal unknown-outcome publication and combined-stage metadata to recovery handling, then verify producer failure and partition offset behavior with broker-backed tests.
+Add broker-backed offset/restart tests and controlled health/token/SMTP tests; then implement exact replay execution from confirmed combined-stage envelopes.
 
 ## Proposed Commits
 

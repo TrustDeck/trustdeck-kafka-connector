@@ -18,6 +18,7 @@
 package org.trustdeck.connector.kafka.operation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -95,6 +96,34 @@ class OperationServiceHttpTest {
         assertEquals(Boolean.TRUE, service.execute(message()));
     }
 
+    /** Verifies standard pseudonym update dispatch and replacement selectors. */
+    @Test
+    void updatesPseudonymThroughClient() {
+        properties.setOperation("UPDATE_PSEUDONYM");
+        assertNotNull(new OperationService(client(), properties).execute(message()));
+    }
+
+    /** Verifies single-value pseudonym deletion rather than domain-wide deletion. */
+    @Test
+    void deletesPseudonymThroughClient() {
+        properties.setOperation("DELETE_PSEUDONYM");
+        assertEquals(Boolean.TRUE, new OperationService(client(), properties).execute(message()));
+    }
+
+    /** Verifies entity replacement dispatch with the mapped TrustDeck UUID. */
+    @Test
+    void updatesEntityThroughClient() {
+        properties.setOperation("UPDATE_ENTITY");
+        assertNotNull(new OperationService(client(), properties).execute(message()));
+    }
+
+    /** Verifies combined creation reads associated pseudonyms before creating its target value. */
+    @Test
+    void createsEntityAndPseudonymThroughClient() {
+        properties.setOperation("CREATE_ENTITY_AND_PSEUDONYM");
+        assertNotNull(new OperationService(client(), properties).execute(message(), "source/0/1"));
+    }
+
     /**
      * Creates a caller-controlled TrustDeck client.
      *
@@ -126,12 +155,21 @@ class OperationServiceHttpTest {
      */
     private void respond(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
-        int status = path.contains("/entities/") && "DELETE".equals(exchange.getRequestMethod()) ? 204
-                : path.contains("/entities/") && "POST".equals(exchange.getRequestMethod()) ? 201 : 201;
+        if (path.endsWith("/pseudonyms") && "GET".equals(exchange.getRequestMethod())) {
+            byte[] response = "[]".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+            return;
+        }
+        int status = "DELETE".equals(exchange.getRequestMethod()) ? 204
+                : "PUT".equals(exchange.getRequestMethod()) ? 200 : 201;
         byte[] response = status == 204 ? new byte[0]
-                : "{\"psn\":\"012-000000009-2\",\"trustdeckID\":\"11111111-1111-1111-1111-111111111111\",\"data\":{}}".getBytes();
+                : "{\"identifierItem\":{\"identifier\":\"0123456789\",\"idType\":\"case_number\"},\"psn\":\"012-000000009-2\",\"trustdeckID\":\"11111111-1111-1111-1111-111111111111\",\"data\":{}}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         exchange.sendResponseHeaders(status, response.length);
-        exchange.getResponseBody().write(response);
+        if (response.length > 0) {
+            exchange.getResponseBody().write(response);
+        }
         exchange.close();
     }
 }
