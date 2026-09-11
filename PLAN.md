@@ -123,8 +123,8 @@ This checklist is maintained against the complete approved scope, not just compi
 - Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, instance template, and baseline documentation.
 - Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
 - TrustDeck client adapter with OAuth client-credentials token caching and finite connect/read timeout configuration.
-- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka and recovery publisher tests pass in targeted verification. The full suite must be rerun after the current integration additions.
-- `git diff --check`, Compose config validation, and client `mvn clean verify` pass.
+- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka and recovery publisher tests pass. `./mvnw clean verify` passes with 27 tests.
+- Strict Javadocs, `git diff --check`, Compose config validation, Docker build, isolated container liveness/readiness probes, and client `mvn clean verify` pass.
 - Client timeout change is isolated on `feature/http-timeouts`, commit `5ca64d7`, with the client test suite previously passing 73 tests.
 
 ### Implemented but not verified
@@ -133,7 +133,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses publish `UNKNOWN_OUTCOME` envelopes with bounded guidance, but publisher failure and broker-offset behavior remain unverified.
 - Combined entity/pseudonym dispatch with bounded in-memory completed-stage state and confirmed recovery UUID fields.
 - Batch Kafka listener wiring, byte-preserving recovery envelope serialization, readiness/liveness groups, outage pause/probe/resume coordinator, and notification integration.
-- Docker builder path for the pinned client development commit, strict Javadoc execution, and isolated container liveness/readiness probes remain to be rerun after the current changes.
+- No additional verification is pending for the Docker builder path, strict Javadocs, or isolated container liveness/readiness probes; all pass in the current implementation.
 
 ### Missing or incomplete
 
@@ -143,7 +143,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Meaningful Kafka/Testcontainers restart/producer-failure/outage/offset integration tests and unsafe partial 206 tests. `ConnectorKafkaIntegrationTest` now proves real listener processing, HTTP effect, confirmed DLT publication, two-container concurrency, and broker-observed commits.
 - Token-expiry/refresh and SMTP cooldown/failure tests.
 - Exact HTTP path/payload assertions, ambiguous-read/linkage-conflict tests, and target-path validation tests.
-- Dependency/license report and complete operation-specific environment documentation are now documented; the generated report and configuration must still be reviewed when dependencies or mappings change.
+- Dependency/license report and complete operation-specific environment documentation are documented and the report generates; the unpublished client is flagged because its POM lacks license metadata and remains a report-review item.
 
 ### Environment-dependent verification
 
