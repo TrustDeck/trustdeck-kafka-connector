@@ -112,6 +112,17 @@ class ConnectorKafkaIntegrationTest {
         assertEquals(1, requestCount);
     }
 
+    /** Sends malformed input through the real listener and observes the confirmed DLT envelope and commit. */
+    @Test
+    void realListenerPublishesDltBeforeCommittingInvalidRecord() throws Exception {
+        byte[] invalid = "{invalid".getBytes(StandardCharsets.UTF_8);
+        var metadata = send(new ProducerRecord<>(SOURCE, new byte[] {2}, invalid));
+        String envelope = pollRecovery();
+        assertNotNull(envelope);
+        assertEquals(true, envelope.contains("\"status\":\"FAILED_DLT\""));
+        awaitCommitted(metadata.topic(), metadata.partition(), metadata.offset() + 1);
+    }
+
     /** Stops the controlled server after all application resources are closed. */
     @AfterAll
     static void stopStub() {
@@ -125,6 +136,32 @@ class ConnectorKafkaIntegrationTest {
         return Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
+    }
+
+    private static org.apache.kafka.clients.producer.RecordMetadata send(ProducerRecord<byte[], byte[]> record)
+            throws Exception {
+        try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(byteProducerSettings())) {
+            return producer.send(record).get(15, TimeUnit.SECONDS);
+        }
+    }
+
+    private static String pollRecovery() {
+        Map<String, Object> settings = Map.of(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
+                ConsumerConfig.GROUP_ID_CONFIG, "recovery-observer-" + UUID.randomUUID(),
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
+                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(settings)) {
+            consumer.subscribe(List.of(DLT));
+            while (System.nanoTime() < deadline) {
+                var records = consumer.poll(java.time.Duration.ofMillis(250));
+                if (!records.isEmpty()) {
+                    return records.iterator().next().value();
+                }
+            }
+        }
+        throw new AssertionError("No recovery envelope was observed");
     }
 
     private static void awaitRequest(String method, String path) throws InterruptedException {

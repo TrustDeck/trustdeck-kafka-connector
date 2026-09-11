@@ -123,7 +123,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, instance template, and baseline documentation.
 - Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
 - TrustDeck client adapter with OAuth client-credentials token caching and finite connect/read timeout configuration.
-- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka and recovery publisher tests pass in targeted verification. The last full clean suite had 22 tests; current additions require a new full run.
+- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka and recovery publisher tests pass in targeted verification. The full suite must be rerun after the current integration additions.
 - `git diff --check`, Compose config validation, and client `mvn clean verify` pass.
 - Client timeout change is isolated on `feature/http-timeouts`, commit `5ca64d7`, with the client test suite previously passing 73 tests.
 
@@ -140,7 +140,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Retry-after handling, producer-outage classification, and verification of terminal handling for unsafe batch outcomes.
 - Full authenticated static/dynamic preflight/resource checks and retry-after handling.
 - Recovery producer-failure tests, full target identity, and replay execution from stage/UUID metadata.
-- Meaningful Kafka/Testcontainers restart/producer-failure/outage/offset integration tests and unsafe partial 206 tests. A disposable Kafka round-trip now proves isolated broker creation and source byte transport.
+- Meaningful Kafka/Testcontainers restart/producer-failure/outage/offset integration tests and unsafe partial 206 tests. `ConnectorKafkaIntegrationTest` now proves real listener processing, HTTP effect, confirmed DLT publication, two-container concurrency, and broker-observed commits.
 - Token-expiry/refresh and SMTP cooldown/failure tests.
 - Exact HTTP path/payload assertions, ambiguous-read/linkage-conflict tests, and target-path validation tests.
 - Dependency/license report and complete operation-specific environment documentation are now documented; the generated report and configuration must still be reviewed when dependencies or mappings change.
@@ -155,7 +155,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Seven operations: implementation `OperationService`; behavioral test `OperationServiceHttpTest` covers all dispatch branches and combined stage-two replay; exact path/payload assertions are still missing.
 - Mapping/timezone: implementation `JsonMessageMapper`; behavioral test `JsonMessageMapperTest`; malformed-input breadth and target-path validation remain missing.
 - Batch/206: implementation `PseudonymBatchService`; behavioral test `PseudonymBatchServiceTest`; unsafe/reduced response and broker outcome tests remain missing.
-- Offsets/recovery: implementation `ConnectorListener`, `RecoveryPublisher`, and `RecoveryEnvelope`; behavioral tests `ConnectorListenerTest`, `RecoveryPublisherTest`, and `ConnectorKafkaIntegrationTest`; the latter proves real listener processing and broker-observed commit, but restart and producer-failure tests are missing.
+- Offsets/recovery: implementation `ConnectorListener`, `RecoveryPublisher`, and `RecoveryEnvelope`; behavioral tests `ConnectorListenerTest`, `RecoveryPublisherTest`, and `ConnectorKafkaIntegrationTest`; the latter proves real listener processing, confirmed DLT publication, and broker-observed commits, but restart and producer-failure tests are missing.
 - Combined/replay: implementation `OperationService` and `ManualReplayService`; `OperationServiceHttpTest` proves stage-two replay without another entity create; restart/process-boundary replay coverage is missing.
 - Outage/health: implementation `OutageCoordinator` and `ConnectorHealthIndicator`; `HealthEndpointTest` proves HTTP endpoints, but pause/resume with a broker is untested.
 - Configuration: implementation `ConfigurationValidation`; behavioral test `ConfigurationValidationTest`; static/dynamic authenticated preflight is missing.
