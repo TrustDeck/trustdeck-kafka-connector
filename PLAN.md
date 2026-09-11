@@ -112,7 +112,7 @@ Use Java 21, Spring Boot 3.5.16 and its managed Spring Kafka line, Jackson/Lombo
 
 Tests will exercise all seven operations against a controlled HTTP stub using the real client, including serialization/status 200/201/206, strict mapping and time conversion, leading zeros, update/delete selectors, combined automatic pseudonym behavior and stage-two replay, true linkage conflicts versus unrelated 409, ambiguous reads, and partial-batch correlation. Disposable uniquely named Kafka/Testcontainers resources will verify partition order, concurrency, manual offsets, DLT/review confirmation and producer failure, restart redelivery, outage pause/heartbeat/recovery, committed versus earliest offsets, bounded polls/large inputs, token refresh/expiry, and SMTP failure/suppression. No existing TrustDeck/PostgreSQL/Keycloak/Kafka service or production backlog is used.
 
-Verification includes clean `./mvnw verify`, strict Javadocs including private members and test-source checks, dependency/license review, `git diff --check`, Compose config validation, Docker build without host Maven-cache reliance, and disposable readiness/liveness checks. Unavailable credentials/services will be reported as unverified with exact commands.
+Verification includes clean `./mvnw verify`, strict Javadocs including private members and test-source checks, dependency/license review (`./mvnw org.codehaus.mojo:license-maven-plugin:2.7.0:add-third-party -Dlicense.includedScopes=compile,runtime`), `git diff --check`, Compose config validation, Docker build without host Maven-cache reliance, and disposable readiness/liveness checks. Unavailable credentials/services will be reported as unverified with exact commands.
 
 ## Implementation Checklist
 
@@ -123,8 +123,8 @@ This checklist is maintained against the complete approved scope, not just compi
 - Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, instance template, and baseline documentation.
 - Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
 - TrustDeck client adapter with OAuth client-credentials token caching and finite connect/read timeout configuration.
-- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health tests plus disposable Kafka and recovery publisher tests bring the clean verification suite to 22 passing tests.
-- Strict Javadocs, `git diff --check`, Compose config validation, Docker build, isolated container liveness/readiness probes, and client `mvn clean verify` pass.
+- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka and recovery publisher tests pass in targeted verification. The last full clean suite had 22 tests; current additions require a new full run.
+- `git diff --check`, Compose config validation, and client `mvn clean verify` pass.
 - Client timeout change is isolated on `feature/http-timeouts`, commit `5ca64d7`, with the client test suite previously passing 73 tests.
 
 ### Implemented but not verified
@@ -133,8 +133,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses publish `UNKNOWN_OUTCOME` envelopes with bounded guidance, but publisher failure and broker-offset behavior remain unverified.
 - Combined entity/pseudonym dispatch with bounded in-memory completed-stage state and confirmed recovery UUID fields.
 - Batch Kafka listener wiring, byte-preserving recovery envelope serialization, readiness/liveness groups, outage pause/probe/resume coordinator, and notification integration.
-- Docker builder path for the pinned client development commit, verified with Docker daemon.
-- Strict Javadoc execution and current handwritten declaration documentation.
+- Docker builder path for the pinned client development commit, strict Javadoc execution, and isolated container liveness/readiness probes remain to be rerun after the current changes.
 
 ### Missing or incomplete
 
@@ -144,23 +143,23 @@ This checklist is maintained against the complete approved scope, not just compi
 - Meaningful Kafka/Testcontainers restart/producer-failure/outage/offset integration tests and unsafe partial 206 tests. A disposable Kafka round-trip now proves isolated broker creation and source byte transport.
 - Token-expiry/refresh and SMTP cooldown/failure tests.
 - Exact HTTP path/payload assertions, ambiguous-read/linkage-conflict tests, and target-path validation tests.
-- Dependency/license report and complete operation-specific environment documentation.
+- Dependency/license report and complete operation-specific environment documentation are now documented; the generated report and configuration must still be reviewed when dependencies or mappings change.
 
-### Blocked
+### Environment-dependent verification
 
-- Live backend permission preflight and end-to-end TrustDeck verification are blocked until isolated synthetic development credentials/resources are available.
-- Disposable Kafka and Docker runtime checks are blocked if the local Docker daemon is unavailable; this will be tested explicitly rather than using development services.
+- Live backend permission preflight and end-to-end TrustDeck verification require isolated synthetic development credentials/resources.
+- Disposable Kafka and Docker runtime checks have passed with the local Docker daemon; this is no longer a current blocker.
 
 ### Requirement Evidence
 
-- Seven operations: implementation `OperationService`; behavioral test `OperationServiceHttpTest`; exact path/payload assertions are still missing.
+- Seven operations: implementation `OperationService`; behavioral test `OperationServiceHttpTest` covers all dispatch branches and combined stage-two replay; exact path/payload assertions are still missing.
 - Mapping/timezone: implementation `JsonMessageMapper`; behavioral test `JsonMessageMapperTest`; malformed-input breadth and target-path validation remain missing.
 - Batch/206: implementation `PseudonymBatchService`; behavioral test `PseudonymBatchServiceTest`; unsafe/reduced response and broker outcome tests remain missing.
-- Offsets/recovery: implementation `ConnectorListener`, `RecoveryPublisher`, and `RecoveryEnvelope`; behavioral tests `ConnectorListenerTest` and `RecoveryPublisherTest`; `KafkaResourceIntegrationTest` proves disposable broker transport, but real broker commit/restart and producer-failure tests are missing.
-- Combined/replay: implementation `OperationService` and recovery metadata; no behavioral replay test exists yet.
+- Offsets/recovery: implementation `ConnectorListener`, `RecoveryPublisher`, and `RecoveryEnvelope`; behavioral tests `ConnectorListenerTest`, `RecoveryPublisherTest`, and `ConnectorKafkaIntegrationTest`; the latter proves real listener processing and broker-observed commit, but restart and producer-failure tests are missing.
+- Combined/replay: implementation `OperationService` and `ManualReplayService`; `OperationServiceHttpTest` proves stage-two replay without another entity create; restart/process-boundary replay coverage is missing.
 - Outage/health: implementation `OutageCoordinator` and `ConnectorHealthIndicator`; `HealthEndpointTest` proves HTTP endpoints, but pause/resume with a broker is untested.
 - Configuration: implementation `ConfigurationValidation`; behavioral test `ConfigurationValidationTest`; static/dynamic authenticated preflight is missing.
-- Client timeout/token: implementation sibling client commit `5ca64d7`; client suite proves timeout behavior and endpoint contracts, but connector token-expiry integration is missing.
+- Client timeout/token: implementation sibling client commit `5ca64d7`; client suite proves timeout behavior and endpoint contracts, and `ClientCredentialsTokenProviderTest` proves expiry refresh against a controlled token endpoint.
 - SMTP: implementation `NotificationService`/`OutageCoordinator`; no suppression/failure behavioral test exists.
 
 ### Next concrete action

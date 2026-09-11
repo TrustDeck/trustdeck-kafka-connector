@@ -77,14 +77,14 @@
             <artifactId>spring-kafka-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- Disposable Kafka and HTTP integration resources (Apache-2.0). -->
+        <!-- Disposable Kafka and HTTP integration resources (MIT). -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>kafka</artifactId>
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
-        <!-- JUnit lifecycle integration for disposable Kafka tests (Apache-2.0). -->
+        <!-- JUnit lifecycle integration for disposable Kafka tests (EPL-2.0). -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>

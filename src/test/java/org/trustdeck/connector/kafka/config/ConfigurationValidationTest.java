@@ -52,6 +52,20 @@ class ConfigurationValidationTest {
         assertThrows(IllegalArgumentException.class, () -> new ConfigurationValidation(properties));
     }
 
+    /** Rejects empty JSON Pointer segments in explicit entity targets. */
+    @Test
+    void entityTargetPointerMustBeNonEmpty() {
+        ConnectorProperties properties = base("CREATE_ENTITY");
+        properties.getTrustdeck().setProject("project");
+        properties.getTrustdeck().setEntityType("type");
+        ConnectorProperties.FieldMapping field = new ConnectorProperties.FieldMapping();
+        field.setSourcePath("/source");
+        field.setTargetPath("/data/");
+        properties.getMapping().setEntityFields(java.util.List.of(field));
+
+        assertThrows(IllegalArgumentException.class, () -> new ConfigurationValidation(properties));
+    }
+
     private ConnectorProperties base(String operation) {
         ConnectorProperties properties = new ConnectorProperties();
         properties.setOperation(operation);

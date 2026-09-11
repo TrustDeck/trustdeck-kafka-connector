@@ -99,6 +99,13 @@ public class ConfigurationValidation {
             if (blank(properties.getTrustdeck().getEntityType()) && blank(properties.getMapping().getEntityTypePath())) {
                 throw new IllegalArgumentException("trustdeck.entity-type or mapping.entity-type-path is required for entity operations.");
             }
+            for (ConnectorProperties.FieldMapping field : properties.getMapping().getEntityFields()) {
+                if (field == null || blank(field.getSourcePath()) || blank(field.getTargetPath())) {
+                    throw new IllegalArgumentException("Entity field mappings require sourcePath and targetPath.");
+                }
+                validatePointer(field.getSourcePath(), "entity field sourcePath");
+                validatePointer(field.getTargetPath(), "entity field targetPath");
+            }
         }
     }
 
@@ -124,6 +131,16 @@ public class ConfigurationValidation {
             }
         } catch (IllegalArgumentException exception) {
             throw new IllegalArgumentException(name + " must be an HTTP(S) URL.", exception);
+        }
+    }
+
+    /** Validates the supported bare-name or JSON Pointer mapping forms. */
+    private static void validatePointer(String value, String name) {
+        if (value.startsWith("/") && (value.equals("/") || value.contains("//") || value.endsWith("/"))) {
+            throw new IllegalArgumentException(name + " is not a valid non-empty JSON Pointer.");
+        }
+        if (value.contains("~") && !value.matches("(?:[^~]|~0|~1)*")) {
+            throw new IllegalArgumentException(name + " contains an invalid JSON Pointer escape.");
         }
     }
 }
