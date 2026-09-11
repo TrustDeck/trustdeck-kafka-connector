@@ -101,6 +101,16 @@ public class OperationService {
         }
     }
 
+    /** Restores a confirmed combined-operation stage for an explicitly initiated replay. */
+    public void restoreCompletedUuid(String correlation, UUID completedUuid) {
+        if (correlation == null || completedUuid == null) {
+            throw new IllegalArgumentException("Replay stage correlation and UUID are required.");
+        }
+        synchronized (combinedStages) {
+            combinedStages.put(correlation, completedUuid);
+        }
+    }
+
     /**
      * Creates a pseudonym and forwards only supplied validity values.
      *

@@ -24,6 +24,9 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -32,6 +35,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.trustdeck.client.TrustDeckClient;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
+import org.trustdeck.connector.kafka.kafka.ManualReplayService;
+import org.trustdeck.connector.kafka.kafka.RecoveryEnvelope;
+import org.trustdeck.connector.kafka.mapping.JsonMessageMapper;
 import org.trustdeck.connector.kafka.mapping.MappedMessage;
 
 /** Verifies operation dispatch and wire calls against a controlled HTTP server. */
@@ -42,6 +48,9 @@ class OperationServiceHttpTest {
 
     /** Connector settings. */
     private ConnectorProperties properties;
+
+    /** Captured HTTP method/path pairs. */
+    private final List<String> requestLog = new CopyOnWriteArrayList<>();
 
     /**
      * Starts the controlled server.
@@ -124,6 +133,25 @@ class OperationServiceHttpTest {
         assertNotNull(new OperationService(client(), properties).execute(message(), "source/0/1"));
     }
 
+    /** Verifies explicit combined replay starts at pseudonym creation using the preserved entity UUID. */
+    @Test
+    void replaysCombinedOperationWithoutCreatingAnotherEntity() {
+        properties.setOperation("CREATE_ENTITY_AND_PSEUDONYM");
+        properties.getMapping().setDomainConstant("source/domain");
+        RecoveryEnvelope envelope = new RecoveryEnvelope("1", "FAILED_DLT", "source", 0, 1,
+                null, "CREATE_ENTITY_AND_PSEUDONYM", "source/domain", "TRANSIENT_OPERATION_FAILURE", 503, 3,
+                "ENTITY_CREATED", "11111111-1111-1111-1111-111111111111", null,
+                java.util.Base64.getEncoder().encodeToString("{}".getBytes()), null, Map.of(), "replay");
+
+        ManualReplayService replay = new ManualReplayService(new JsonMessageMapper(properties),
+                new OperationService(client(), properties), properties);
+        assertNotNull(replay.replay(envelope, "{}".getBytes()));
+
+        assertEquals(1, requestLog.stream().filter(path -> path.startsWith("POST") && path.contains("/pseudonyms")).count());
+        assertEquals(0, requestLog.stream().filter(path -> path.contains("/entities/") && path.startsWith("POST"))
+                .count());
+    }
+
     /**
      * Creates a caller-controlled TrustDeck client.
      *
@@ -155,6 +183,7 @@ class OperationServiceHttpTest {
      */
     private void respond(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
+        requestLog.add(exchange.getRequestMethod() + " " + path);
         if (path.endsWith("/pseudonyms") && "GET".equals(exchange.getRequestMethod())) {
             byte[] response = "[]".getBytes(java.nio.charset.StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, response.length);
