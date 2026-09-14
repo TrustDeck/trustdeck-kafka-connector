@@ -39,11 +39,44 @@ import java.util.Map;
  * @param username source user
  * @param safeHeaders allowlisted source headers
  * @param manualGuidance bounded operator guidance
+ * @param targetProject resolved entity project
+ * @param targetEntityType resolved entity type
  */
 public record RecoveryEnvelope(String schemaVersion, String status, String sourceTopic, int partition,
                                long offset, Instant sourceTimestamp, String operation, String resolvedTarget,
                                String failureCategory, Integer httpStatus, int attempts,
-                                String completedStage, String completedUuid, String keyBase64,
-                                String valueBase64, String username, Map<String, String> safeHeaders,
-                                String manualGuidance) {
+                                 String completedStage, String completedUuid, String keyBase64,
+                                 String valueBase64, String username, Map<String, String> safeHeaders,
+                                 String manualGuidance, String targetProject, String targetEntityType) {
+
+    /** Keeps the original envelope constructor available for existing persisted envelopes.
+     * @param schemaVersion envelope schema version
+     * @param status terminal status
+     * @param sourceTopic source topic
+     * @param partition source partition
+     * @param offset source offset
+     * @param sourceTimestamp source timestamp
+     * @param operation operation name
+     * @param resolvedTarget resolved target
+     * @param failureCategory safe failure category
+     * @param httpStatus HTTP status
+     * @param attempts attempt count
+     * @param completedStage completed stage
+     * @param completedUuid completed UUID
+     * @param keyBase64 original key
+     * @param valueBase64 original value
+     * @param username source user
+     * @param safeHeaders safe headers
+     * @param manualGuidance operator guidance
+     */
+    public RecoveryEnvelope(String schemaVersion, String status, String sourceTopic, int partition,
+                            long offset, Instant sourceTimestamp, String operation, String resolvedTarget,
+                            String failureCategory, Integer httpStatus, int attempts,
+                            String completedStage, String completedUuid, String keyBase64,
+                            String valueBase64, String username, Map<String, String> safeHeaders,
+                            String manualGuidance) {
+        this(schemaVersion, status, sourceTopic, partition, offset, sourceTimestamp, operation, resolvedTarget,
+                failureCategory, httpStatus, attempts, completedStage, completedUuid, keyBase64, valueBase64,
+                username, safeHeaders, manualGuidance, null, null);
+    }
 }

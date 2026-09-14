@@ -59,7 +59,7 @@ class RecoveryPublisherTest {
         var jsonCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(template).send(eq("source.DLT"), eq("AQI="), jsonCaptor.capture());
         JsonNode envelope = mapper.readTree(jsonCaptor.getValue());
-        assertEquals("1", envelope.get("schemaVersion").asText());
+        assertEquals("2", envelope.get("schemaVersion").asText());
         assertEquals("FAILED_DLT", envelope.get("status").asText());
         assertEquals(2, envelope.get("partition").asInt());
         assertEquals(7, envelope.get("offset").asLong());

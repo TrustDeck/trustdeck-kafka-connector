@@ -19,6 +19,7 @@ import org.springframework.web.client.RestClient;
         "spring.kafka.bootstrap-servers=localhost:9092",
         "spring.kafka.listener.auto-startup=false",
         "spring.kafka.listener.missing-topics-fatal=false",
+        "connector.preflight.enabled=false",
         "spring.kafka.properties.security.protocol=PLAINTEXT",
         "connector.operation=CREATE_PSEUDONYM",
         "connector.source-topic=health-source",

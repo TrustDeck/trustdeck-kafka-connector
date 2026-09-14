@@ -28,6 +28,7 @@ class PseudonymBatchServiceTest {
 
     private HttpServer server;
     private int singleCreates;
+    private String batchBody;
 
     @BeforeEach
     void start() throws IOException {
@@ -58,13 +59,33 @@ class PseudonymBatchServiceTest {
         assertEquals(1, singleCreates);
     }
 
+    /** Verifies an optional validity duration is retained in a batch request. */
+    @Test
+    void forwardsOptionalValidityTimeInBatch() {
+        ConnectorProperties properties = new ConnectorProperties();
+        properties.setBatchSize(10);
+        properties.setBatchBytes(100_000);
+        TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
+        ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+
+        new PseudonymBatchService(client, properties, mapper).execute(List.of(message("one", "p1", "1d")));
+
+        assertEquals(true, batchBody.contains("\"validityTime\":\"1d\""));
+    }
+
     private MappedMessage message(String identifier, String psn) {
         return new MappedMessage("domain", identifier, "type", psn, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
+    private MappedMessage message(String identifier, String psn, String validityTime) {
+        return new MappedMessage("domain", identifier, "type", psn, validityTime, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
     private void respond(HttpExchange exchange) throws IOException {
         boolean batch = exchange.getRequestURI().getPath().endsWith("/batch");
+        batchBody = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         if (!batch) {
             singleCreates++;
         }

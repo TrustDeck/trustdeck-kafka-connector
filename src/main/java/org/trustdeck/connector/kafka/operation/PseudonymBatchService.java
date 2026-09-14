@@ -74,7 +74,8 @@ public class PseudonymBatchService {
         }
         List<Pseudonym> request = messages.stream().map(message -> Pseudonym.builder()
                 .identifierItem(IdentifierItem.builder().identifier(message.identifier()).idType(message.idType()).build())
-                .psn(message.psn()).validFrom(message.validFrom()).validTo(message.validTo()).build()).toList();
+                .psn(message.psn()).validityTime(message.validityTime()).validFrom(message.validFrom())
+                .validTo(message.validTo()).build()).toList();
         try {
             if (mapper.writeValueAsBytes(request).length > properties.getBatchBytes()) {
                 throw new IllegalArgumentException("Pseudonym batch exceeds the configured byte limit.");

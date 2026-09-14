@@ -99,6 +99,21 @@ class OperationServiceHttpTest {
         assertTrue(body.get("validTo") == null);
     }
 
+    /** Verifies an optional validity duration is forwarded without changing the normal create contract. */
+    @Test
+    void forwardsOptionalValidityTime() throws IOException {
+        MappedMessage mapped = new MappedMessage("source/domain", "0123456789", "case_number",
+                "012-000000009-2", "1d", null, null, null, "synthetic-type", null,
+                new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(), null, null, null,
+                null, null, null, null, null);
+
+        new OperationService(client(), properties).execute(mapped);
+
+        com.fasterxml.jackson.databind.JsonNode body = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(requestBodies.get(0));
+        assertEquals("1d", body.get("validityTime").asText());
+    }
+
     /** Verifies entity creation uses the arbitrary mapped JSON object. */
     @Test
     void createsEntityThroughClient() {

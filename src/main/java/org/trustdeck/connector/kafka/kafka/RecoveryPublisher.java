@@ -135,12 +135,13 @@ public class RecoveryPublisher {
     private void publish(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
                          String category, String status, int attempts, Throwable failure,
                          String topic, String manualGuidance, UUID completedUuid) throws Exception {
-        RecoveryEnvelope envelope = new RecoveryEnvelope("1", status, record.topic(), record.partition(),
+        RecoveryEnvelope envelope = new RecoveryEnvelope("2", status, record.topic(), record.partition(),
                 record.offset(), record.timestamp() < 0 ? null : java.time.Instant.ofEpochMilli(record.timestamp()),
                 properties.getOperation(), mapped == null ? null : mapped.domain(), category, httpStatus(failure), attempts,
                 completedUuid == null ? null : "ENTITY_CREATED", completedUuid == null ? null : completedUuid.toString(),
                 record.key() == null ? null : Base64.getEncoder().encodeToString(record.key()),
-                Base64.getEncoder().encodeToString(record.value()), mapped == null ? null : mapped.username(), safeHeaders(record), manualGuidance);
+                Base64.getEncoder().encodeToString(record.value()), mapped == null ? null : mapped.username(), safeHeaders(record),
+                manualGuidance, properties.getTrustdeck().getProject(), mapped == null ? null : mapped.entityType());
         String json = mapper.writeValueAsString(envelope);
         String key = record.key() == null ? null : Base64.getEncoder().encodeToString(record.key());
         template.send(topic, key, json).get(Duration.ofSeconds(10).toMillis(), TimeUnit.MILLISECONDS);

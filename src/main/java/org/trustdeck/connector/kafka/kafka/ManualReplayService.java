@@ -43,7 +43,11 @@ public class ManualReplayService {
     public Object replay(RecoveryEnvelope envelope, byte[] originalValue) {
         validate(envelope);
         MappedMessage mapped = mapper.map(originalValue);
-        if (envelope.resolvedTarget() == null || !envelope.resolvedTarget().equals(mapped.domain())) {
+        if (envelope.resolvedTarget() == null || !envelope.resolvedTarget().equals(mapped.domain())
+                || (envelope.targetProject() != null
+                && !envelope.targetProject().equals(properties.getTrustdeck().getProject()))
+                || (envelope.targetEntityType() != null
+                && !envelope.targetEntityType().equals(mapped.entityType()))) {
             throw new IllegalArgumentException("Recovery target does not match the replayed mapping.");
         }
         String correlation = envelope.sourceTopic() + "/" + envelope.partition() + "/" + envelope.offset();
@@ -54,7 +58,7 @@ public class ManualReplayService {
     }
 
     private void validate(RecoveryEnvelope envelope) {
-        if (envelope == null || !"1".equals(envelope.schemaVersion())
+        if (envelope == null || (!"1".equals(envelope.schemaVersion()) && !"2".equals(envelope.schemaVersion()))
                 || !properties.getOperation().equals(envelope.operation())) {
             throw new IllegalArgumentException("Recovery envelope version or operation is not replayable.");
         }

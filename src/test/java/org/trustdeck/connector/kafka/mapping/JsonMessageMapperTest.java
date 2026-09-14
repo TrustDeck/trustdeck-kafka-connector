@@ -36,11 +36,12 @@ class JsonMessageMapperTest {
         ConnectorProperties properties = properties();
         JsonMessageMapper mapper = new JsonMessageMapper(properties);
 
-        MappedMessage mapped = mapper.map("{\"value\":\"0123456789\",\"type\":\"case_number\",\"domain\":\"datalake\",\"time\":\"2025-10-09 21:08:10.175\"}".getBytes());
+        MappedMessage mapped = mapper.map("{\"value\":\"0123456789\",\"type\":\"case_number\",\"domain\":\"datalake\",\"time\":\"2025-10-09 21:08:10.175\",\"validity\":\"1d\"}".getBytes());
 
         assertEquals("0123456789", mapped.identifier());
         assertEquals("datalake", mapped.domain());
         assertEquals(LocalDateTime.of(2025, 10, 9, 19, 8, 10, 175_000_000), mapped.validFrom());
+        assertEquals("1d", mapped.validityTime());
     }
 
     /**
@@ -87,6 +88,7 @@ class JsonMessageMapperTest {
         properties.getMapping().setDomainPath("/domain");
         properties.getMapping().setIdentifierPath("/value");
         properties.getMapping().setIdTypePath("/type");
+        properties.getMapping().setValidityTimePath("/validity");
         properties.getMapping().setValidFromPath("/time");
         properties.getMapping().setSourceTimezone("Europe/Berlin");
         properties.getMapping().setDatetimeFormat("uuuu-MM-dd HH:mm:ss.SSS");

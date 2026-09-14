@@ -18,9 +18,13 @@
 package org.trustdeck.connector.kafka.kafka;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
@@ -31,6 +35,7 @@ import org.trustdeck.connector.kafka.mapping.MappedMessage;
 import org.trustdeck.connector.kafka.mapping.MappingException;
 import org.trustdeck.connector.kafka.operation.OperationService;
 import org.trustdeck.connector.kafka.operation.PseudonymBatchService;
+import org.trustdeck.connector.kafka.trustdeck.TrustDeckPreflight;
 
 /** Consumes records and acknowledges only completed TrustDeck or recovery work. */
 @Component
@@ -54,6 +59,9 @@ public class ConnectorListener {
     /** Systemic failure pause coordinator. */
     private final OutageCoordinator outage;
 
+    /** Authenticated static and dynamic resource preflight. */
+    private final TrustDeckPreflight preflight;
+
     /**
      * Creates the listener.
      *
@@ -64,15 +72,33 @@ public class ConnectorListener {
      * @param batches pseudonym batch service
      * @param outage outage coordinator
      */
+    @Autowired
     public ConnectorListener(JsonMessageMapper mapper, OperationService operations,
-                              RecoveryPublisher recovery, ConnectorProperties properties,
-                              PseudonymBatchService batches, OutageCoordinator outage) {
+                               RecoveryPublisher recovery, ConnectorProperties properties,
+                               PseudonymBatchService batches, OutageCoordinator outage) {
+        this(mapper, operations, recovery, properties, batches, outage, null);
+    }
+
+    /** Creates the listener with authenticated resource preflight.
+     * @param mapper source mapper
+     * @param operations operation service
+     * @param recovery recovery publisher
+     * @param properties connector settings
+     * @param batches batch service
+     * @param outage outage coordinator
+     * @param preflight resource preflight
+     */
+    public ConnectorListener(JsonMessageMapper mapper, OperationService operations,
+                             RecoveryPublisher recovery, ConnectorProperties properties,
+                             PseudonymBatchService batches, OutageCoordinator outage,
+                             TrustDeckPreflight preflight) {
         this.mapper = mapper;
         this.operations = operations;
         this.recovery = recovery;
         this.properties = properties;
         this.batches = batches;
         this.outage = outage;
+        this.preflight = preflight;
     }
 
     /**
@@ -88,20 +114,21 @@ public class ConnectorListener {
         for (int index = 0; index < records.size(); index++) {
             ConsumerRecord<byte[], byte[]> record = records.get(index);
             if (record.value() == null || record.value().length > properties.getMaxRecordBytes()) {
-                recovery.publishDlt(record, null, "INVALID_RECORD", 0,
+                publishDlt(record, null, "INVALID_RECORD", 0,
                         new MappingException("Kafka value is null or exceeds the configured size."));
             mapped.add(null);
             } else {
                 try {
                     mapped.add(mapper.map(record.value()));
                 } catch (MappingException exception) {
-                    recovery.publishDlt(record, null, "INVALID_MAPPING", 0, exception);
+                    publishDlt(record, null, "INVALID_MAPPING", 0, exception);
                     mapped.add(null);
                 }
             }
         }
         if (properties.getOperation().equals("CREATE_PSEUDONYM") && safeBatch(records, mapped)) {
             try {
+                verifyTargets(mapped);
                 batches.execute(mapped);
             } catch (Exception failure) {
                 if (systemic(failure)) {
@@ -109,7 +136,7 @@ public class ConnectorListener {
                     throw failure;
                 }
                 for (int index = 0; index < records.size(); index++) {
-                    recovery.publishUnknown(records.get(index), mapped.get(index), failure,
+                    publishUnknown(records.get(index), mapped.get(index), failure,
                             operations.completedUuid(correlation(records.get(index))));
                     acknowledgment.acknowledge(index);
                 }
@@ -139,17 +166,39 @@ public class ConnectorListener {
     private void processOne(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
                             Acknowledgment acknowledgment, int index) throws Exception {
         try {
+            verifyTargets(List.of(mapped));
             operations.execute(mapped, correlation(record));
             // Future result publishing belongs here, with the source correlation and returned object.
             acknowledgment.acknowledge(index);
         } catch (RecordLinkageConflictException exception) {
-            recovery.publishReview(record, mapped, 1, exception);
+            publishReview(record, mapped, 1, exception);
             acknowledgment.acknowledge(index);
         } catch (MappingException | IllegalArgumentException exception) {
-            recovery.publishDlt(record, mapped, "INVALID_MAPPING", 0, exception);
+            publishDlt(record, mapped, "INVALID_MAPPING", 0, exception);
             acknowledgment.acknowledge(index);
         } catch (Exception exception) {
             retryOrDlt(record, mapped, exception, acknowledgment, index);
+        }
+    }
+
+    /** Performs authenticated checks for dynamic targets before external work. */
+    private void verifyTargets(List<MappedMessage> mapped) {
+        if (preflight == null) {
+            return;
+        }
+        for (MappedMessage message : mapped) {
+            if (message == null) {
+                continue;
+            }
+            String operation = properties.getOperation();
+            if (operation.equals("CREATE_PSEUDONYM") || operation.equals("UPDATE_PSEUDONYM")
+                    || operation.equals("DELETE_PSEUDONYM") || operation.equals("CREATE_ENTITY_AND_PSEUDONYM")) {
+                preflight.verifyDomain(message.domain());
+            }
+            if (operation.equals("CREATE_ENTITY") || operation.equals("UPDATE_ENTITY")
+                    || operation.equals("DELETE_ENTITY") || operation.equals("CREATE_ENTITY_AND_PSEUDONYM")) {
+                preflight.verifyEntityType(properties.getTrustdeck().getProject(), message.entityType());
+            }
         }
     }
 
@@ -188,8 +237,7 @@ public class ConnectorListener {
         int attempts = properties.getRecovery().getMaxAttempts();
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
-                Thread.sleep(Math.min(Duration.ofSeconds(30).toMillis(),
-                        properties.getRecovery().getInitialBackoff().toMillis() * (1L << Math.min(attempt - 1, 5))));
+                Thread.sleep(retryDelay(failure, attempt));
                 operations.execute(mapped, correlation(record));
                 acknowledgment.acknowledge(index);
                 return;
@@ -204,8 +252,43 @@ public class ConnectorListener {
                 }
             }
         }
-        recovery.publishDlt(record, mapped, category(failure), attempts, failure);
+        publishDlt(record, mapped, category(failure), attempts, failure);
         acknowledgment.acknowledge(index);
+    }
+
+    /** Selects a bounded server-directed delay, or the existing exponential fallback. */
+    private long retryDelay(Exception failure, int attempt) {
+        if (failure instanceof org.trustdeck.client.exception.TrustDeckResponseException response) {
+            Long retryAfter = retryAfterMillis(response.getRetryAfter());
+            if (retryAfter != null) {
+                return retryAfter;
+            }
+        }
+        return Math.min(Duration.ofSeconds(30).toMillis(),
+                properties.getRecovery().getInitialBackoff().toMillis() * (1L << Math.min(attempt - 1, 5)));
+    }
+
+    /** Parses Retry-After delta-seconds or an HTTP date and clamps it to the retry safety bound. */
+    private Long retryAfterMillis(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String header = value.trim();
+        try {
+            long seconds = Long.parseLong(header);
+            if (seconds < 0) {
+                return null;
+            }
+            return seconds >= 30 ? Duration.ofSeconds(30).toMillis() : seconds * 1000L;
+        } catch (NumberFormatException ignored) {
+            try {
+                long millis = Duration.between(Instant.now(),
+                        ZonedDateTime.parse(header, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()).toMillis();
+                return Math.max(0, Math.min(Duration.ofSeconds(30).toMillis(), millis));
+            } catch (RuntimeException invalidHeader) {
+                return null;
+            }
+        }
     }
 
     /** Identifies backend/authentication failures that must not be drained to recovery topics. */
@@ -214,10 +297,15 @@ public class ConnectorListener {
             return response.getStatusCode() == 401 || response.getStatusCode() == 403
                     || response.getStatusCode() >= 500;
         }
-        return failure instanceof java.net.ConnectException
+        return failure instanceof org.apache.kafka.common.KafkaException
+                || failure instanceof java.util.concurrent.TimeoutException
+                || failure instanceof java.util.concurrent.ExecutionException
+                || failure instanceof java.net.ConnectException
                 || failure instanceof java.net.SocketTimeoutException
                 || failure instanceof java.io.IOException
-                || failure.getCause() instanceof java.io.IOException;
+                || failure.getCause() instanceof java.io.IOException
+                || failure.getCause() instanceof org.apache.kafka.common.KafkaException
+                || failure.getCause() instanceof java.util.concurrent.TimeoutException;
     }
 
     /** Converts known failures to a safe recovery category. */
@@ -227,7 +315,47 @@ public class ConnectorListener {
                     ? "AUTHORIZATION_FAILURE" : response.getStatusCode() >= 500
                     ? "BACKEND_UNAVAILABLE" : "TRANSIENT_OPERATION_FAILURE";
         }
+        if (failure instanceof org.apache.kafka.common.KafkaException
+                || failure instanceof java.util.concurrent.TimeoutException
+                || failure instanceof java.util.concurrent.ExecutionException
+                || failure.getCause() instanceof org.apache.kafka.common.KafkaException
+                || failure.getCause() instanceof java.util.concurrent.TimeoutException) {
+            return "RECOVERY_PRODUCER_UNAVAILABLE";
+        }
         return systemic(failure) ? "BACKEND_UNAVAILABLE" : "TRANSIENT_OPERATION_FAILURE";
+    }
+
+    /** Publishes recovery data without acknowledging when the recovery producer is unavailable. */
+    private void publishDlt(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
+                            String category, int attempts, Throwable failure) throws Exception {
+        try {
+            recovery.publishDlt(record, mapped, category, attempts, failure);
+        } catch (Exception publicationFailure) {
+            outage.pause("RECOVERY_PRODUCER_UNAVAILABLE");
+            throw publicationFailure;
+        }
+    }
+
+    /** Publishes linkage review data without acknowledging when the recovery producer is unavailable. */
+    private void publishReview(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
+                               int attempts, Throwable failure) throws Exception {
+        try {
+            recovery.publishReview(record, mapped, attempts, failure);
+        } catch (Exception publicationFailure) {
+            outage.pause("RECOVERY_PRODUCER_UNAVAILABLE");
+            throw publicationFailure;
+        }
+    }
+
+    /** Publishes an unknown outcome without acknowledging when the recovery producer is unavailable. */
+    private void publishUnknown(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
+                                Throwable failure, java.util.UUID completedUuid) throws Exception {
+        try {
+            recovery.publishUnknown(record, mapped, failure, completedUuid);
+        } catch (Exception publicationFailure) {
+            outage.pause("RECOVERY_PRODUCER_UNAVAILABLE");
+            throw publicationFailure;
+        }
     }
 
     /**

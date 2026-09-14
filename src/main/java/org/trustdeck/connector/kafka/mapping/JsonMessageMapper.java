@@ -104,6 +104,7 @@ public class JsonMessageMapper {
         String identifier = value(root, null, mapping.getIdentifierPath(), false);
         String idType = value(root, null, mapping.getIdTypePath(), false);
         String psn = value(root, null, mapping.getPsnPath(), false);
+        String validityTime = value(root, null, mapping.getValidityTimePath(), false);
         LocalDateTime validFrom = datetime(root, mapping.getValidFromPath());
         LocalDateTime validTo = datetime(root, mapping.getValidToPath());
         String username = value(root, null, mapping.getUsernamePath(), false);
@@ -134,7 +135,7 @@ public class JsonMessageMapper {
         if ((operation.equals("UPDATE_ENTITY") || operation.equals("DELETE_ENTITY")) && entityId == null) {
             throw new MappingException("Entity update/delete requires a mapped TrustDeck UUID.");
         }
-        return new MappedMessage(domain, identifier, idType, psn, validFrom, validTo, username,
+        return new MappedMessage(domain, identifier, idType, psn, validityTime, validFrom, validTo, username,
                 entityType, entityId, entityData, oldIdentifier, oldIdType, oldPsn,
                 newIdentifier, newIdType, newPsn, oldDomain, newDomain);
     }

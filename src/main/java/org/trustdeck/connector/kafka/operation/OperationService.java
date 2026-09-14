@@ -121,7 +121,7 @@ public class OperationService {
      * @return returned pseudonym
      */
     private Pseudonym createPseudonym(MappedMessage message) {
-        Pseudonym pseudonym = pseudonym(message.identifier(), message.idType(), message.psn(),
+        Pseudonym pseudonym = pseudonym(message.identifier(), message.idType(), message.psn(), message.validityTime(),
                 message.validFrom(), message.validTo());
         return client.pseudonyms(message.domain()).create(pseudonym, false);
     }
@@ -242,7 +242,7 @@ public class OperationService {
                 return existing;
             }
         }
-        Pseudonym pseudonym = pseudonym(entityId.toString(), "TrustDeckID", message.psn(),
+        Pseudonym pseudonym = pseudonym(entityId.toString(), "TrustDeckID", message.psn(), message.validityTime(),
                 message.validFrom(), message.validTo());
         return client.pseudonyms(message.domain()).create(pseudonym, false);
     }
@@ -253,14 +253,15 @@ public class OperationService {
      * @param identifier identifier
      * @param idType type
      * @param psn optional imported value
+     * @param validityTime optional validity duration
      * @param validFrom optional start
      * @param validTo optional end
      * @return pseudonym payload
      */
-    private Pseudonym pseudonym(String identifier, String idType, String psn,
+    private Pseudonym pseudonym(String identifier, String idType, String psn, String validityTime,
                                 java.time.LocalDateTime validFrom, java.time.LocalDateTime validTo) {
         return Pseudonym.builder().identifierItem(item(identifier, idType)).psn(psn)
-                .validFrom(validFrom).validTo(validTo).build();
+                .validityTime(validityTime).validFrom(validFrom).validTo(validTo).build();
     }
 
     /**

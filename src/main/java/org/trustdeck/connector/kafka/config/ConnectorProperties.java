@@ -139,6 +139,9 @@ public class ConnectorProperties {
         /** Message pointer for an imported pseudonym value. */
         private String psnPath;
 
+        /** Optional message pointer for a pseudonym validity duration. */
+        private String validityTimePath;
+
         /** Message pointer for valid-from conversion. */
         private String validFromPath;
 

@@ -9,9 +9,8 @@ package org.trustdeck.connector.kafka.kafka;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.trustdeck.client.TrustDeckClient;
-import org.trustdeck.connector.kafka.config.ConnectorProperties;
 import org.trustdeck.connector.kafka.notification.NotificationService;
+import org.trustdeck.connector.kafka.trustdeck.TrustDeckPreflight;
 
 /** Pauses source containers during systemic backend failures and probes for recovery. */
 @Component
@@ -19,24 +18,21 @@ public class OutageCoordinator {
 
     private final OutageState state;
     private final KafkaListenerEndpointRegistry registry;
-    private final TrustDeckClient client;
-    private final ConnectorProperties properties;
+    private final TrustDeckPreflight preflight;
     private final NotificationService notifications;
 
     /** Creates the outage coordinator.
      * @param state shared outage state
      * @param registry listener containers
-     * @param client authenticated client
-     * @param properties connector settings
+     * @param preflight authenticated resource preflight
      * @param notifications optional SMTP notifications
      */
     public OutageCoordinator(OutageState state, KafkaListenerEndpointRegistry registry,
-                             TrustDeckClient client, ConnectorProperties properties,
+                             TrustDeckPreflight preflight,
                              NotificationService notifications) {
         this.state = state;
         this.registry = registry;
-        this.client = client;
-        this.properties = properties;
+        this.preflight = preflight;
         this.notifications = notifications;
     }
 
@@ -63,16 +59,7 @@ public class OutageCoordinator {
             return;
         }
         try {
-            String project = properties.getTrustdeck().getProject();
-            if (project != null && !project.isBlank()) {
-                client.projects().get(project);
-            } else {
-                String domain = properties.getMapping().getDomainConstant();
-                if (domain == null || domain.isBlank()) {
-                    return;
-                }
-                client.domains().get(domain);
-            }
+            preflight.verifyStaticResources();
             registry.getListenerContainers().forEach(container -> {
                 if (container.isContainerPaused()) {
                     container.resume();

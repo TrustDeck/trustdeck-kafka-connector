@@ -196,6 +196,10 @@ class ConnectorKafkaIntegrationTest {
                     .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, response.length);
             exchange.getResponseBody().write(response);
+        } else if ("GET".equals(exchange.getRequestMethod())) {
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
         } else if ("POST".equals(exchange.getRequestMethod())) {
             requestCount++;
             byte[] response = "{\"trustdeckID\":\"11111111-1111-1111-1111-111111111111\",\"data\":{}}"

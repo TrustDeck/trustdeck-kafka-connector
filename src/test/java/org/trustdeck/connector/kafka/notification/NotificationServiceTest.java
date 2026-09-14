@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import java.time.Duration;
 
 /** Verifies advisory SMTP notification behavior. */
 class NotificationServiceTest {
@@ -45,5 +46,21 @@ class NotificationServiceTest {
         assertDoesNotThrow(() -> new NotificationService(provider, "to@example.test", "from@example.test", "[Test]")
                 .send("Subject", "Body"));
         verify(sender).send(org.mockito.ArgumentMatchers.any(SimpleMailMessage.class));
+    }
+
+    /** Ensures repeated outage notices are cooled down while recovery is always sent. */
+    @Test
+    void coolsDownOutageButNotRecoveryNotification() {
+        ObjectProvider<JavaMailSender> provider = mock(ObjectProvider.class);
+        JavaMailSender sender = mock(JavaMailSender.class);
+        when(provider.getIfAvailable()).thenReturn(sender);
+        NotificationService notifications = new NotificationService(provider, "to@example.test", "from@example.test",
+                "[Test]", Duration.ofHours(1));
+
+        notifications.send("TrustDeck outage", "first");
+        notifications.send("TrustDeck outage", "duplicate");
+        notifications.send("TrustDeck recovered", "recovered");
+
+        verify(sender, org.mockito.Mockito.times(2)).send(org.mockito.ArgumentMatchers.any(SimpleMailMessage.class));
     }
 }

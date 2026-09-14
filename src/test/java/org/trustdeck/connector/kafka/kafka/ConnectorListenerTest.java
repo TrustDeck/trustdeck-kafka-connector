@@ -82,6 +82,29 @@ class ConnectorListenerTest {
                 org.mockito.ArgumentMatchers.any());
     }
 
+    /** Ensures a recovery producer failure pauses processing before the source offset is acknowledged. */
+    @Test
+    void pausesWhenRecoveryPublicationFails() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        RecoveryPublisher recovery = mock(RecoveryPublisher.class);
+        ConnectorProperties properties = properties("CREATE_ENTITY");
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        OutageCoordinator outage = mock(OutageCoordinator.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        ConsumerRecord<byte[], byte[]> source = record(0, new byte[] {1});
+        when(mapper.map(source.value())).thenThrow(new MappingException("invalid"));
+        org.mockito.Mockito.doThrow(new IllegalStateException("recovery broker unavailable")).when(recovery)
+                .publishDlt(eq(source), eq(null), eq("INVALID_MAPPING"), eq(0),
+                        org.mockito.ArgumentMatchers.any(MappingException.class));
+
+        assertThrows(Exception.class, () -> new ConnectorListener(mapper, operations, recovery, properties, batches, outage)
+                .onMessage(List.of(source), acknowledgment));
+
+        verify(outage).pause("RECOVERY_PRODUCER_UNAVAILABLE");
+        verify(acknowledgment, never()).acknowledge(0);
+    }
+
     private ConnectorProperties properties(String operation) {
         ConnectorProperties properties = new ConnectorProperties();
         properties.setOperation(operation);

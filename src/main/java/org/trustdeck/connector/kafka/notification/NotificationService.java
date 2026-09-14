@@ -18,6 +18,10 @@
 package org.trustdeck.connector.kafka.notification;
 
 import java.util.List;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -40,6 +44,12 @@ public class NotificationService {
     /** Configured subject prefix. */
     private final String subjectPrefix;
 
+    /** Minimum interval between repeated non-recovery subjects. */
+    private final Duration cooldown;
+
+    /** Last attempted notification by subject. */
+    private final ConcurrentMap<String, Instant> lastSent = new ConcurrentHashMap<>();
+
     /**
      * Creates a notification service.
      *
@@ -52,11 +62,28 @@ public class NotificationService {
                                @org.springframework.beans.factory.annotation.Value("${SMTP_TO:}") String recipients,
                                @org.springframework.beans.factory.annotation.Value("${SMTP_FROM:}") String from,
                                @org.springframework.beans.factory.annotation.Value("${SUBJECT_PREFIX:[TrustDeck Kafka Connector]}") String subjectPrefix) {
+        this(sender, recipients, from, subjectPrefix, Duration.ofMinutes(15));
+    }
+
+    /** Creates a notification service with an explicit repeat-notification cooldown.
+     * @param sender mail sender
+     * @param recipients configured recipients
+     * @param from configured sender
+     * @param subjectPrefix configured subject prefix
+     * @param cooldown repeat-notification interval
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    public NotificationService(ObjectProvider<JavaMailSender> sender,
+                               @org.springframework.beans.factory.annotation.Value("${SMTP_TO:}") String recipients,
+                               @org.springframework.beans.factory.annotation.Value("${SMTP_FROM:}") String from,
+                               @org.springframework.beans.factory.annotation.Value("${SUBJECT_PREFIX:[TrustDeck Kafka Connector]}") String subjectPrefix,
+                               @org.springframework.beans.factory.annotation.Value("${SMTP_COOLDOWN:15m}") Duration cooldown) {
         this.sender = sender;
         this.recipients = recipients == null ? List.of() : java.util.Arrays.stream(recipients.split(","))
                 .map(String::trim).filter(value -> !value.isBlank()).toList();
         this.from = from;
         this.subjectPrefix = subjectPrefix;
+        this.cooldown = cooldown == null || cooldown.isNegative() ? Duration.ZERO : cooldown;
     }
 
     /**
@@ -68,6 +95,17 @@ public class NotificationService {
     public void send(String subject, String body) {
         if (recipients.isEmpty()) {
             return;
+        }
+        boolean recovery = subject != null && subject.toLowerCase(java.util.Locale.ROOT).contains("recovered");
+        Instant now = Instant.now();
+        if (!recovery && cooldown.compareTo(Duration.ZERO) > 0) {
+            Instant previous = lastSent.putIfAbsent(subject, now);
+            if (previous != null && previous.plus(cooldown).isAfter(now)) {
+                return;
+            }
+            if (previous != null) {
+                lastSent.replace(subject, previous, now);
+            }
         }
         try {
             SimpleMailMessage message = new SimpleMailMessage();

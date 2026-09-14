@@ -71,6 +71,8 @@ connector:
   batch-bytes: ${TRUSTDECK_BATCH_BYTES:262144}
   connect-timeout: ${TRUSTDECK_CONNECT_TIMEOUT:5s}
   read-timeout: ${TRUSTDECK_READ_TIMEOUT:30s}
+  preflight:
+    enabled: ${CONNECTOR_PREFLIGHT_ENABLED:true}
   trustdeck:
     service-url: ${TRUSTDECK_SERVICE_URL}
     token-endpoint: ${KEYCLOAK_TOKEN_ENDPOINT}
@@ -84,6 +86,7 @@ connector:
     identifier-path: ${KAFKA_MESSAGE_IDENTIFIER_DESCRIPTOR:}
     id-type-path: ${KAFKA_MESSAGE_IDTYPE_DESCRIPTOR:}
     psn-path: ${KAFKA_MESSAGE_PSN_DESCRIPTOR:}
+    validity-time-path: ${KAFKA_MESSAGE_VALIDITY_TIME_DESCRIPTOR:}
     valid-from-path: ${KAFKA_MESSAGE_VALID_FROM_DESCRIPTOR:}
     valid-to-path: ${KAFKA_MESSAGE_VALID_TO_DESCRIPTOR:}
     username-path: ${KAFKA_MESSAGE_USERNAME_DESCRIPTOR:}
