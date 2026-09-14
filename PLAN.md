@@ -123,7 +123,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, instance template, and baseline documentation.
 - Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
 - TrustDeck client adapter with OAuth client-credentials token caching, finite connect/read timeout configuration, and bounded `Retry-After` propagation.
-- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka and recovery publisher/notification tests pass. `./mvnw clean verify` passes with 35 tests.
+- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka and recovery publisher/notification tests pass. `./mvnw clean verify` passes with 34 tests.
 - Strict Javadocs, `git diff --check`, Compose config validation, Docker build, isolated container liveness/readiness probes, and client `mvn clean verify` pass.
 - Client timeout and `Retry-After` changes are isolated on `feature/http-timeouts`, commits `5ca64d7` and `0133ed9`, with the client test suite passing 74 tests.
 

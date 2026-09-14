@@ -110,6 +110,8 @@ class ConnectorKafkaIntegrationTest {
         }
         awaitRequest("POST", "/api/projects/synthetic-project/entities/synthetic-type");
         assertEquals(1, requestCount);
+        assertEquals(true, requestPaths.contains("/api/projects/synthetic-project"));
+        assertEquals(true, requestPaths.contains("/api/projects/synthetic-project/entities/config/synthetic-type"));
     }
 
     /** Sends malformed input through the real listener and observes the confirmed DLT envelope and commit. */
