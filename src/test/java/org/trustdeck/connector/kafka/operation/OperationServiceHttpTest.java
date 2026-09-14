@@ -19,6 +19,7 @@ package org.trustdeck.connector.kafka.operation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -52,6 +53,9 @@ class OperationServiceHttpTest {
     /** Captured HTTP method/path pairs. */
     private final List<String> requestLog = new CopyOnWriteArrayList<>();
 
+    /** Captured request bodies. */
+    private final List<String> requestBodies = new CopyOnWriteArrayList<>();
+
     /**
      * Starts the controlled server.
      *
@@ -77,11 +81,22 @@ class OperationServiceHttpTest {
 
     /** Verifies create serializes the imported pseudonym and accepts HTTP 201. */
     @Test
-    void createsPseudonymThroughClient() {
+    void createsPseudonymThroughClient() throws IOException {
         OperationService service = new OperationService(client(), properties);
         Object result = service.execute(message());
 
         assertEquals("012-000000009-2", ((org.trustdeck.client.model.Pseudonym) result).getPsn());
+        assertEquals("POST /api/domains/source%2Fdomain/pseudonyms", requestLog.get(0));
+        com.fasterxml.jackson.databind.JsonNode body = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(requestBodies.get(0));
+        assertEquals("0123456789", body.at("/identifierItem/identifier").asText());
+        assertEquals("case_number", body.at("/identifierItem/idType").asText());
+        assertEquals("012-000000009-2", body.get("psn").asText());
+        assertTrue(body.get("validFrom").isArray());
+        assertEquals(2025, body.get("validFrom").get(0).asInt());
+        assertEquals(10, body.get("validFrom").get(1).asInt());
+        assertEquals(9, body.get("validFrom").get(2).asInt());
+        assertTrue(body.get("validTo") == null);
     }
 
     /** Verifies entity creation uses the arbitrary mapped JSON object. */
@@ -183,7 +198,8 @@ class OperationServiceHttpTest {
      */
     private void respond(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
-        requestLog.add(exchange.getRequestMethod() + " " + path);
+        requestBodies.add(new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+        requestLog.add(exchange.getRequestMethod() + " " + exchange.getRequestURI().getRawPath());
         if (path.endsWith("/pseudonyms") && "GET".equals(exchange.getRequestMethod())) {
             byte[] response = "[]".getBytes(java.nio.charset.StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, response.length);
