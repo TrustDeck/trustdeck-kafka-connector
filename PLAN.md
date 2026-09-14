@@ -26,7 +26,7 @@ All paths are relative to the configured TrustDeck base URL and use the separate
 
 | Operation | Client method and endpoint | Required mapping/behavior |
 |---|---|---|
-| `CREATE_PSEUDONYM` | `client.pseudonyms(domain).create(Pseudonym, false)`; `POST /api/domains/{domain}/pseudonyms` | `identifier`, `idType`; optional supplied `psn`, `validFrom`, `validTo`, `validityTime`; accept 200 existing and 201 created. `validityTime` is approved but not currently mapped or sent and remains an implementation gap. |
+| `CREATE_PSEUDONYM` | `client.pseudonyms(domain).create(Pseudonym, false)`; `POST /api/domains/{domain}/pseudonyms` | `identifier`, `idType`; optional supplied `psn`, `validFrom`, `validTo`, `validityTime`; accept 200 existing and 201 created. |
 | `UPDATE_PSEUDONYM` | `pseudonyms(oldDomain).update(PseudonymUpdate)` or approved `updateComplete`; `PUT /api/domains/{domain}/pseudonyms` or `/complete` | Explicit old selector, mapped validity fields, and only the approved complete-update fields. No implicit domain move or regeneration. |
 | `DELETE_PSEUDONYM` | `pseudonyms(domain).delete(psn)` where supplied, otherwise exact identifier lookup then single delete | `DELETE /api/domains/{domain}/pseudonyms`; reject ambiguous identifier matches. Never call `deleteBatch()`, which deletes the whole domain. |
 | `CREATE_ENTITY` | `entities(project, type).create(Entity)`; `POST /api/projects/{project}/entities/{type}` | Explicit mapped JSON object in `Entity.data`; no automatic linkage resolution. |
@@ -156,7 +156,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Offsets/recovery: implementation `ConnectorListener`, `RecoveryPublisher`, and `RecoveryEnvelope`; behavioral tests cover recovery producer propagation and source-ack protection, while `ConnectorKafkaIntegrationTest` proves real listener processing, confirmed DLT publication, and broker-observed commits; broker restart and producer-failure tests are missing.
 - Combined/replay: implementation `OperationService` and `ManualReplayService`; `OperationServiceHttpTest` proves stage-two replay without another entity create; restart/process-boundary replay coverage is missing.
 - Outage/health: implementation `OutageCoordinator`, `TrustDeckPreflight`, and `ConnectorHealthIndicator`; `ConnectorKafkaIntegrationTest` exercises authenticated startup preflight and `HealthEndpointTest` proves HTTP endpoints, but pause/resume with a broker is untested.
-- Configuration: implementation `ConfigurationValidation`; behavioral test `ConfigurationValidationTest`; static/dynamic authenticated preflight is missing.
+- Configuration: implementation `ConfigurationValidation`; behavioral test `ConfigurationValidationTest`; `ConnectorKafkaIntegrationTest` exercises authenticated startup and dynamic-target preflight against the HTTP stub.
 - Client timeout/token: implementation sibling client commits `5ca64d7` and `0133ed9`; client suite proves timeout behavior, endpoint contracts, and `Retry-After` propagation, while `ClientCredentialsTokenProviderTest` proves expiry refresh against a controlled token endpoint.
 - SMTP: implementation `NotificationService`/`OutageCoordinator`; `NotificationServiceTest` proves recipient suppression, transport-failure isolation, cooldown suppression, and uncapped recovery notification.
 
