@@ -26,7 +26,7 @@ All paths are relative to the configured TrustDeck base URL and use the separate
 
 | Operation | Client method and endpoint | Required mapping/behavior |
 |---|---|---|
-| `CREATE_PSEUDONYM` | `client.pseudonyms(domain).create(Pseudonym, false)`; `POST /api/domains/{domain}/pseudonyms` | `identifier`, `idType`; optional supplied `psn`, `validFrom`, `validTo`, `validityTime`; accept 200 existing and 201 created. |
+| `CREATE_PSEUDONYM` | `client.pseudonyms(domain).create(Pseudonym, false)`; `POST /api/domains/{domain}/pseudonyms` | `identifier`, `idType`; optional supplied `psn`, `validFrom`, `validTo`, `validityTime`; accept 200 existing and 201 created. `validityTime` is approved but not currently mapped or sent and remains an implementation gap. |
 | `UPDATE_PSEUDONYM` | `pseudonyms(oldDomain).update(PseudonymUpdate)` or approved `updateComplete`; `PUT /api/domains/{domain}/pseudonyms` or `/complete` | Explicit old selector, mapped validity fields, and only the approved complete-update fields. No implicit domain move or regeneration. |
 | `DELETE_PSEUDONYM` | `pseudonyms(domain).delete(psn)` where supplied, otherwise exact identifier lookup then single delete | `DELETE /api/domains/{domain}/pseudonyms`; reject ambiguous identifier matches. Never call `deleteBatch()`, which deletes the whole domain. |
 | `CREATE_ENTITY` | `entities(project, type).create(Entity)`; `POST /api/projects/{project}/entities/{type}` | Explicit mapped JSON object in `Entity.data`; no automatic linkage resolution. |
@@ -130,7 +130,7 @@ This checklist is maintained against the complete approved scope, not just compi
 ### Implemented but not verified
 
 - Pseudonym batch request construction, byte limit enforcement, and occurrence-aware response matching.
-- Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses publish `UNKNOWN_OUTCOME` envelopes with bounded guidance, but publisher failure and broker-offset behavior remain unverified.
+- Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses publish `UNKNOWN_OUTCOME` envelopes with bounded guidance, and recovery publisher failure propagation is unit-tested, but broker-offset behavior remains unverified.
 - Combined entity/pseudonym dispatch with bounded in-memory completed-stage state and confirmed recovery UUID fields.
 - Batch Kafka listener wiring, byte-preserving recovery envelope serialization, readiness/liveness groups, outage pause/probe/resume coordinator, and notification integration.
 - No additional verification is pending for the Docker builder path, strict Javadocs, or isolated container liveness/readiness probes; all pass in the current implementation.
@@ -142,7 +142,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Broker-level recovery producer-failure tests, full target identity, and replay execution from stage/UUID metadata.
 - Meaningful Kafka/Testcontainers restart/producer-failure/outage/offset integration tests and unsafe partial 206 tests. `ConnectorKafkaIntegrationTest` now proves real listener processing, HTTP effect, confirmed DLT publication, two-container concurrency, and broker-observed commits.
 - SMTP cooldown tests; suppression and transport-failure isolation are covered by `NotificationServiceTest`.
-- Exact HTTP path/payload assertions and ambiguous-read/linkage-conflict tests.
+- Remaining exact HTTP path/payload assertions and ambiguous-read/linkage-conflict tests; pseudonym-create path/payload coverage is complete.
 - Dependency/license report and complete operation-specific environment documentation are documented; the report generates successfully with the unpublished client license metadata recognized.
 
 ### Environment-dependent verification
