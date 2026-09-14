@@ -141,9 +141,9 @@ This checklist is maintained against the complete approved scope, not just compi
 - Full authenticated static/dynamic preflight/resource checks and retry-after handling.
 - Recovery producer-failure tests, full target identity, and replay execution from stage/UUID metadata.
 - Meaningful Kafka/Testcontainers restart/producer-failure/outage/offset integration tests and unsafe partial 206 tests. `ConnectorKafkaIntegrationTest` now proves real listener processing, HTTP effect, confirmed DLT publication, two-container concurrency, and broker-observed commits.
-- Token-expiry/refresh and SMTP cooldown/failure tests.
-- Exact HTTP path/payload assertions, ambiguous-read/linkage-conflict tests, and target-path validation tests.
-- Dependency/license report and complete operation-specific environment documentation are documented and the report generates; the unpublished client is flagged because its POM lacks license metadata and remains a report-review item.
+- SMTP cooldown/failure tests.
+- Exact HTTP path/payload assertions and ambiguous-read/linkage-conflict tests.
+- Dependency/license report and complete operation-specific environment documentation are documented; the report generates successfully with the unpublished client license metadata recognized.
 
 ### Environment-dependent verification
 
@@ -153,7 +153,7 @@ This checklist is maintained against the complete approved scope, not just compi
 ### Requirement Evidence
 
 - Seven operations: implementation `OperationService`; behavioral test `OperationServiceHttpTest` covers all dispatch branches and combined stage-two replay; exact path/payload assertions are still missing.
-- Mapping/timezone: implementation `JsonMessageMapper`; behavioral test `JsonMessageMapperTest`; malformed-input breadth and target-path validation remain missing.
+- Mapping/timezone: implementation `JsonMessageMapper`; behavioral test `JsonMessageMapperTest`; malformed-input breadth remains missing, while target-path validation is covered by `ConfigurationValidationTest`.
 - Batch/206: implementation `PseudonymBatchService`; behavioral test `PseudonymBatchServiceTest`; unsafe/reduced response and broker outcome tests remain missing.
 - Offsets/recovery: implementation `ConnectorListener`, `RecoveryPublisher`, and `RecoveryEnvelope`; behavioral tests `ConnectorListenerTest`, `RecoveryPublisherTest`, and `ConnectorKafkaIntegrationTest`; the latter proves real listener processing, confirmed DLT publication, and broker-observed commits, but restart and producer-failure tests are missing.
 - Combined/replay: implementation `OperationService` and `ManualReplayService`; `OperationServiceHttpTest` proves stage-two replay without another entity create; restart/process-boundary replay coverage is missing.
