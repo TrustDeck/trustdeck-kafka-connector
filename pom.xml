@@ -22,32 +22,32 @@
     </properties>
 
     <dependencies>
-        <!-- Kafka listener and producer support (Apache-2.0). -->
+        <!-- Kafka listener and producer support (License: Apache-2.0). -->
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
         </dependency>
-        <!-- HTTP endpoint and JSON support (Apache-2.0). -->
+        <!-- HTTP endpoint and JSON support (License: Apache-2.0). -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-        <!-- Bean validation for startup configuration (Apache-2.0). -->
+        <!-- Bean validation for startup configuration (License: Apache-2.0). -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
-        <!-- Health and readiness endpoints (Apache-2.0). -->
+        <!-- Health and readiness endpoints (License: Apache-2.0). -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
-        <!-- Optional SMTP notification support (Apache-2.0). -->
+        <!-- Optional SMTP notification support (License: Apache-2.0). -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
-        <!-- TrustDeck resource client (Apache-2.0; unpublished pinned development build). -->
+        <!-- TrustDeck resource client (License: Apache-2.0; unpublished pinned development build). -->
         <dependency>
             <groupId>org.trustdeck</groupId>
             <artifactId>client</artifactId>
@@ -59,32 +59,32 @@
                 </exclusion>
             </exclusions>
         </dependency>
-        <!-- Compile-time boilerplate generation (MIT). -->
+        <!-- Compile-time boilerplate generation (License: MIT). -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
-        <!-- Unit and application tests (EPL-2.0). -->
+        <!-- Unit and application tests (License: EPL-2.0). -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- Kafka test utilities (Apache-2.0). -->
+        <!-- Kafka test utilities (License: Apache-2.0). -->
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- Disposable Kafka and HTTP integration resources (MIT). -->
+        <!-- Disposable Kafka and HTTP integration resources (License: MIT). -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>kafka</artifactId>
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
-        <!-- JUnit lifecycle integration for disposable Kafka tests (EPL-2.0). -->
+        <!-- JUnit lifecycle integration for disposable Kafka tests (License: EPL-2.0). -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>
