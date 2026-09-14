@@ -123,7 +123,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, instance template, and baseline documentation.
 - Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
 - TrustDeck client adapter with OAuth client-credentials token caching and finite connect/read timeout configuration.
-- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka and recovery publisher tests pass. `./mvnw clean verify` passes with 27 tests.
+- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka and recovery publisher/notification tests pass. `./mvnw clean verify` passes with 30 tests.
 - Strict Javadocs, `git diff --check`, Compose config validation, Docker build, isolated container liveness/readiness probes, and client `mvn clean verify` pass.
 - Client timeout change is isolated on `feature/http-timeouts`, commit `5ca64d7`, with the client test suite previously passing 73 tests.
 
@@ -139,9 +139,9 @@ This checklist is maintained against the complete approved scope, not just compi
 
 - Retry-after handling, producer-outage classification, and verification of terminal handling for unsafe batch outcomes.
 - Full authenticated static/dynamic preflight/resource checks and retry-after handling.
-- Recovery producer-failure tests, full target identity, and replay execution from stage/UUID metadata.
+- Broker-level recovery producer-failure tests, full target identity, and replay execution from stage/UUID metadata.
 - Meaningful Kafka/Testcontainers restart/producer-failure/outage/offset integration tests and unsafe partial 206 tests. `ConnectorKafkaIntegrationTest` now proves real listener processing, HTTP effect, confirmed DLT publication, two-container concurrency, and broker-observed commits.
-- SMTP cooldown/failure tests.
+- SMTP cooldown tests; suppression and transport-failure isolation are covered by `NotificationServiceTest`.
 - Exact HTTP path/payload assertions and ambiguous-read/linkage-conflict tests.
 - Dependency/license report and complete operation-specific environment documentation are documented; the report generates successfully with the unpublished client license metadata recognized.
 
@@ -152,7 +152,7 @@ This checklist is maintained against the complete approved scope, not just compi
 
 ### Requirement Evidence
 
-- Seven operations: implementation `OperationService`; behavioral test `OperationServiceHttpTest` covers all dispatch branches and combined stage-two replay; exact path/payload assertions are still missing.
+- Seven operations: implementation `OperationService`; behavioral test `OperationServiceHttpTest` covers all dispatch branches, combined stage-two replay, and exact pseudonym path/payload assertions; remaining operation payload assertions are missing.
 - Mapping/timezone: implementation `JsonMessageMapper`; behavioral test `JsonMessageMapperTest`; malformed-input breadth remains missing, while target-path validation is covered by `ConfigurationValidationTest`.
 - Batch/206: implementation `PseudonymBatchService`; behavioral test `PseudonymBatchServiceTest`; unsafe/reduced response and broker outcome tests remain missing.
 - Offsets/recovery: implementation `ConnectorListener`, `RecoveryPublisher`, and `RecoveryEnvelope`; behavioral tests `ConnectorListenerTest`, `RecoveryPublisherTest`, and `ConnectorKafkaIntegrationTest`; the latter proves real listener processing, confirmed DLT publication, and broker-observed commits, but restart and producer-failure tests are missing.
@@ -160,7 +160,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Outage/health: implementation `OutageCoordinator` and `ConnectorHealthIndicator`; `HealthEndpointTest` proves HTTP endpoints, but pause/resume with a broker is untested.
 - Configuration: implementation `ConfigurationValidation`; behavioral test `ConfigurationValidationTest`; static/dynamic authenticated preflight is missing.
 - Client timeout/token: implementation sibling client commit `5ca64d7`; client suite proves timeout behavior and endpoint contracts, and `ClientCredentialsTokenProviderTest` proves expiry refresh against a controlled token endpoint.
-- SMTP: implementation `NotificationService`/`OutageCoordinator`; no suppression/failure behavioral test exists.
+- SMTP: implementation `NotificationService`/`OutageCoordinator`; `NotificationServiceTest` proves recipient suppression and transport-failure isolation; cooldown behavior remains unimplemented and untested.
 
 ### Next concrete action
 

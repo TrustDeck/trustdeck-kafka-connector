@@ -8,12 +8,14 @@ package org.trustdeck.connector.kafka.kafka;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 import java.util.Base64;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -67,5 +69,22 @@ class RecoveryPublisherTest {
         assertEquals(1, envelope.get("safeHeaders").size());
         assertArrayEquals(key, Base64.getDecoder().decode(envelope.get("keyBase64").asText()));
         assertArrayEquals(value, Base64.getDecoder().decode(envelope.get("valueBase64").asText()));
+    }
+
+    /** Ensures a failed producer confirmation prevents recovery publication from being treated as complete. */
+    @Test
+    void propagatesRecoveryProducerFailure() {
+        KafkaTemplate<String, String> template = mock(KafkaTemplate.class);
+        ConnectorProperties properties = new ConnectorProperties();
+        properties.setOperation("CREATE_ENTITY");
+        properties.getRecovery().setDltTopic("source.DLT");
+        org.mockito.Mockito.when(template.send(eq("source.DLT"), eq(null), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable")));
+
+        ConsumerRecord<byte[], byte[]> record = new ConsumerRecord<>("source", 0, 0, null, new byte[] {1});
+
+        assertThrows(ExecutionException.class,
+                () -> new RecoveryPublisher(template, properties, new ObjectMapper())
+                        .publishDlt(record, null, "INVALID_MAPPING", 0, new IllegalArgumentException("bad input")));
     }
 }
