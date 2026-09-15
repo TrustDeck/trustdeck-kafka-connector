@@ -89,6 +89,54 @@ class PseudonymBatchServiceTest {
         assertEquals(0, singleCreates);
     }
 
+    /** Correlates a complete response by identifying fields rather than response order. */
+    @Test
+    void correlatesReorderedCompleteResponse() {
+        responseMode = "reordered";
+        ConnectorProperties properties = new ConnectorProperties();
+        properties.setBatchSize(10);
+        properties.setBatchBytes(100_000);
+        TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
+
+        List<org.trustdeck.client.model.Pseudonym> result = new PseudonymBatchService(client, properties,
+                new ObjectMapper().registerModule(new JavaTimeModule())).execute(
+                        List.of(message("one", "p1"), message("two", "p2")));
+
+        assertEquals(2, result.size());
+        assertEquals(0, singleCreates);
+    }
+
+    /** Matches repeated source occurrences independently instead of treating the second as a duplicate response. */
+    @Test
+    void correlatesRepeatedOccurrences() {
+        responseMode = "duplicate";
+        ConnectorProperties properties = new ConnectorProperties();
+        properties.setBatchSize(10);
+        properties.setBatchBytes(100_000);
+        TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
+
+        List<org.trustdeck.client.model.Pseudonym> result = new PseudonymBatchService(client, properties,
+                new ObjectMapper().registerModule(new JavaTimeModule())).execute(
+                        List.of(message("one", "p1"), message("one", "p1")));
+
+        assertEquals(2, result.size());
+        assertEquals(0, singleCreates);
+    }
+
+    /** Rejects a complete response containing an identifier that was not requested. */
+    @Test
+    void rejectsUnmatchedCompleteResponse() {
+        responseMode = "unmatched";
+        ConnectorProperties properties = new ConnectorProperties();
+        properties.setBatchSize(10);
+        properties.setBatchBytes(100_000);
+        TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
+
+        assertThrows(IllegalStateException.class, () -> new PseudonymBatchService(client, properties,
+                new ObjectMapper().registerModule(new JavaTimeModule())).execute(List.of(message("one", "p1"))));
+        assertEquals(0, singleCreates);
+    }
+
     /** Enforces the serialized UTF-8 batch limit rather than a character count. */
     @Test
     void rejectsUtf8BatchAboveByteLimit() {
@@ -118,8 +166,15 @@ class PseudonymBatchServiceTest {
         if (!batch) {
             singleCreates++;
         }
-        String response = responseMode.equals("reduced") ? "[{\"psn\":\"p1\"}]"
-                : "[{\"identifierItem\":{\"identifier\":\"one\",\"idType\":\"type\"},\"psn\":\"p1\"}]";
+        String response = switch (responseMode) {
+            case "reduced" -> "[{\"psn\":\"p1\"}]";
+            case "reordered" -> "[{\"identifierItem\":{\"identifier\":\"two\",\"idType\":\"type\"},\"psn\":\"p2\"},"
+                    + "{\"identifierItem\":{\"identifier\":\"one\",\"idType\":\"type\"},\"psn\":\"p1\"}]";
+            case "duplicate" -> "[{\"identifierItem\":{\"identifier\":\"one\",\"idType\":\"type\"},\"psn\":\"p1\"},"
+                    + "{\"identifierItem\":{\"identifier\":\"one\",\"idType\":\"type\"},\"psn\":\"p1\"}]";
+            case "unmatched" -> "[{\"identifierItem\":{\"identifier\":\"other\",\"idType\":\"type\"},\"psn\":\"p9\"}]";
+            default -> "[{\"identifierItem\":{\"identifier\":\"one\",\"idType\":\"type\"},\"psn\":\"p1\"}]";
+        };
         if (!batch) {
             response = "{\"identifierItem\":{\"identifier\":\"two\",\"idType\":\"type\"},\"psn\":\"p2\"}";
         }
