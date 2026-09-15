@@ -28,9 +28,9 @@ import org.springframework.web.client.RestClient;
         "connector.trustdeck.token-endpoint=https://identity.example.test/token",
         "connector.trustdeck.client-id=test-client",
         "connector.trustdeck.client-secret=test-secret",
-        "connector.mapping.domain-constant=health-domain",
-        "connector.mapping.identifier-path=/identifier",
-        "connector.mapping.id-type-path=/idType",
+        "connector.mapping.common.domain-constant=health-domain",
+        "connector.mapping.common.identifier-path=/identifier",
+        "connector.mapping.common.id-type-path=/idType",
         "connector.recovery.dlt-topic=health-dlt",
         "connector.recovery.review-topic=health-review"
 })

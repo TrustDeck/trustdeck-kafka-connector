@@ -100,25 +100,27 @@ public class JsonMessageMapper {
 
         ConnectorProperties.MappingProperties mapping = properties.getMapping();
         String operation = properties.getOperation();
-        String domain = value(root, mapping.getDomainConstant(), mapping.getDomainPath(), false);
-        String identifier = value(root, null, mapping.getIdentifierPath(), false);
-        String idType = value(root, null, mapping.getIdTypePath(), false);
-        String psn = value(root, null, mapping.getPsnPath(), false);
-        String validityTime = value(root, null, mapping.getValidityTimePath(), false);
-        LocalDateTime validFrom = datetime(root, mapping.getValidFromPath());
-        LocalDateTime validTo = datetime(root, mapping.getValidToPath());
-        String username = value(root, null, mapping.getUsernamePath(), false);
-        String entityType = value(root, properties.getTrustdeck().getEntityType(), mapping.getEntityTypePath(), false);
-        UUID entityId = parseUuid(value(root, null, mapping.getEntityIdPath(), false));
-        ObjectNode entityData = entityData(root, mapping.getEntityFields());
-        String oldIdentifier = value(root, null, mapping.getOldIdentifierPath(), false);
-        String oldIdType = value(root, null, mapping.getOldIdTypePath(), false);
-        String oldPsn = value(root, null, mapping.getOldPsnPath(), false);
-        String newIdentifier = value(root, null, mapping.getNewIdentifierPath(), false);
-        String newIdType = value(root, null, mapping.getNewIdTypePath(), false);
-        String newPsn = value(root, null, mapping.getNewPsnPath(), false);
-        String oldDomain = value(root, null, mapping.getOldDomainPath(), false);
-        String newDomain = value(root, null, mapping.getNewDomainPath(), false);
+        var common = mapping.getCommon();
+        var update = mapping.getUpdatePseudonym();
+        String domain = value(root, common.getDomainConstant(), common.getDomainPath(), false);
+        String identifier = value(root, null, common.getIdentifierPath(), false);
+        String idType = value(root, null, common.getIdTypePath(), false);
+        String psn = value(root, null, common.getPsnPath(), false);
+        String validityTime = value(root, null, common.getValidityTimePath(), false);
+        LocalDateTime validFrom = datetime(root, common.getValidFromPath());
+        LocalDateTime validTo = datetime(root, common.getValidToPath());
+        String username = value(root, null, common.getUsernamePath(), false);
+        String entityType = value(root, properties.getTrustdeck().getEntityType(), common.getEntityTypePath(), false);
+        UUID entityId = parseUuid(value(root, null, common.getEntityIdPath(), false));
+        ObjectNode entityData = entityData(root, common.getEntityFields());
+        String oldIdentifier = value(root, null, update.getOldIdentifierPath(), false);
+        String oldIdType = value(root, null, update.getOldIdTypePath(), false);
+        String oldPsn = value(root, null, update.getOldPsnPath(), false);
+        String newIdentifier = value(root, null, update.getNewIdentifierPath(), false);
+        String newIdType = value(root, null, update.getNewIdTypePath(), false);
+        String newPsn = value(root, null, update.getNewPsnPath(), false);
+        String oldDomain = value(root, null, update.getOldDomainPath(), false);
+        String newDomain = value(root, null, update.getNewDomainPath(), false);
 
         if (operation.equals("CREATE_PSEUDONYM") || operation.equals("UPDATE_PSEUDONYM")) {
             require(identifier, "identifierPath");
@@ -188,14 +190,14 @@ public class JsonMessageMapper {
                 return java.time.OffsetDateTime.parse(text, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
                         .withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
             } catch (DateTimeParseException ignored) {
-                String pattern = properties.getMapping().getDatetimeFormat();
+                String pattern = properties.getMapping().getCommon().getDatetimeFormat();
                 if (pattern == null || pattern.isBlank()) {
                     throw new MappingException("Offset-free timestamp requires mapping.datetimeFormat.");
                 }
                 DateTimeFormatter formatter = new DateTimeFormatterBuilder().appendPattern(pattern)
                         .toFormatter().withResolverStyle(ResolverStyle.STRICT);
                 LocalDateTime local = LocalDateTime.parse(text, formatter);
-                ZoneId zone = ZoneId.of(properties.getMapping().getSourceTimezone());
+                ZoneId zone = ZoneId.of(properties.getMapping().getCommon().getSourceTimezone());
                 List<ZoneOffset> offsets = zone.getRules().getValidOffsets(local);
                 if (offsets.size() != 1) {
                     throw new MappingException("Timestamp falls in an ambiguous or nonexistent local time.");

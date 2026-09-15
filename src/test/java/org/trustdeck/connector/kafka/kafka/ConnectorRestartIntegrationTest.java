@@ -127,8 +127,8 @@ class ConnectorRestartIntegrationTest {
                 Map.entry("connector.trustdeck.client-secret", "restart-secret"),
                 Map.entry("connector.trustdeck.project", "synthetic-project"),
                 Map.entry("connector.trustdeck.entity-type", "synthetic-type"),
-                Map.entry("connector.mapping.entity-fields[0].source-path", "/marker"),
-                Map.entry("connector.mapping.entity-fields[0].target-path", "marker"));
+                Map.entry("connector.mapping.common.entity-fields[0].source-path", "/marker"),
+                Map.entry("connector.mapping.common.entity-fields[0].target-path", "marker"));
         return new SpringApplicationBuilder(TrustDeckKafkaConnectorApplication.class)
                 .web(WebApplicationType.NONE)
                 .run(properties.entrySet().stream().map(entry -> "--" + entry.getKey() + "=" + entry.getValue())

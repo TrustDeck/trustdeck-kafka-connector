@@ -168,7 +168,7 @@ class OperationServiceHttpTest {
     @Test
     void replaysCombinedOperationWithoutCreatingAnotherEntity() {
         properties.setOperation("CREATE_ENTITY_AND_PSEUDONYM");
-        properties.getMapping().setDomainConstant("source/domain");
+        properties.getMapping().getCommon().setDomainConstant("source/domain");
         RecoveryEnvelope envelope = new RecoveryEnvelope("1", "FAILED_DLT", "source", 0, 1,
                 null, "CREATE_ENTITY_AND_PSEUDONYM", "source/domain", "TRANSIENT_OPERATION_FAILURE", 503, 3,
                 "ENTITY_CREATED", "11111111-1111-1111-1111-111111111111", null,
@@ -187,7 +187,7 @@ class OperationServiceHttpTest {
     @Test
     void replayUsesPreservedValueAcrossProcessBoundary() {
         properties.setOperation("CREATE_ENTITY_AND_PSEUDONYM");
-        properties.getMapping().setDomainConstant("source/domain");
+        properties.getMapping().getCommon().setDomainConstant("source/domain");
         RecoveryEnvelope envelope = new RecoveryEnvelope("1", "FAILED_DLT", "source", 0, 1,
                 null, "CREATE_ENTITY_AND_PSEUDONYM", "source/domain", "TRANSIENT_OPERATION_FAILURE", 503, 3,
                 "ENTITY_CREATED", "11111111-1111-1111-1111-111111111111", null,

@@ -124,72 +124,75 @@ public class ConnectorProperties {
         /** Creates empty mapping settings for property binding. */
         public MappingProperties() {
         }
+        /** Mappings shared by the selected operation and entity operations. */
+        @Valid
+        private CommonMappingProperties common = new CommonMappingProperties();
+
+        /** Selectors and replacement fields used only by pseudonym updates. */
+        @Valid
+        private UpdatePseudonymMappingProperties updatePseudonym = new UpdatePseudonymMappingProperties();
+
+    }
+
+    /** Common mappings and conversion rules. */
+    @Data
+    public static class CommonMappingProperties {
+        /** Creates common mappings with UTC as the default source timezone. */
+        public CommonMappingProperties() {
+        }
         /** Constant domain override. */
         private String domainConstant;
-
         /** Message pointer for a domain. */
         private String domainPath;
-
         /** Message pointer for the pseudonym identifier. */
         private String identifierPath;
-
         /** Message pointer for the identifier type. */
         private String idTypePath;
-
         /** Message pointer for an imported pseudonym value. */
         private String psnPath;
-
         /** Optional message pointer for a pseudonym validity duration. */
         private String validityTimePath;
-
         /** Message pointer for valid-from conversion. */
         private String validFromPath;
-
         /** Message pointer for valid-to conversion. */
         private String validToPath;
-
         /** Optional message pointer for source provenance. */
         private String usernamePath;
-
         /** Optional message pointer for a project entity type. */
         private String entityTypePath;
-
         /** Optional message pointer for a TrustDeck entity UUID. */
         private String entityIdPath;
-
-        /** Message pointer for the old pseudonym identifier. */
-        private String oldIdentifierPath;
-
-        /** Message pointer for the old pseudonym type. */
-        private String oldIdTypePath;
-
-        /** Message pointer for the old pseudonym value. */
-        private String oldPsnPath;
-
-        /** Message pointer for a replacement pseudonym identifier. */
-        private String newIdentifierPath;
-
-        /** Message pointer for a replacement pseudonym type. */
-        private String newIdTypePath;
-
-        /** Message pointer for a replacement pseudonym value. */
-        private String newPsnPath;
-
-        /** Message pointer for the old pseudonym domain. */
-        private String oldDomainPath;
-
-        /** Message pointer for a replacement pseudonym domain. */
-        private String newDomainPath;
-
-        /** Optional target entity data mapping definitions. */
+        /** Entity data mappings shared by entity create, update, and combined operations. */
         private java.util.List<FieldMapping> entityFields = new java.util.ArrayList<>();
-
         /** IANA zone for offset-free source timestamps. */
         @NotBlank
         private String sourceTimezone = "UTC";
-
         /** Strict format for offset-free timestamps. */
         private String datetimeFormat;
+    }
+
+    /** Pseudonym update selectors and replacement mappings. */
+    @Data
+    public static class UpdatePseudonymMappingProperties {
+        /** Creates empty pseudonym update mappings for property binding. */
+        public UpdatePseudonymMappingProperties() {
+        }
+        /** Message pointer for the old pseudonym identifier. */
+        private String oldIdentifierPath;
+        /** Message pointer for the old pseudonym type. */
+        private String oldIdTypePath;
+        /** Message pointer for the old pseudonym value. */
+        private String oldPsnPath;
+        /** Message pointer for a replacement pseudonym identifier. */
+        private String newIdentifierPath;
+        /** Message pointer for a replacement pseudonym type. */
+        private String newIdTypePath;
+        /** Message pointer for a replacement pseudonym value. */
+        private String newPsnPath;
+        /** Message pointer for the old pseudonym domain. */
+        private String oldDomainPath;
+        /** Message pointer for a replacement pseudonym domain. */
+        private String newDomainPath;
     }
 
     /** One explicit source-to-target mapping for entity data or identifiers. */

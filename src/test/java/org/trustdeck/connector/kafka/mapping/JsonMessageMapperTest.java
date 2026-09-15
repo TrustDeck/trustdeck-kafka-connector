@@ -50,7 +50,7 @@ class JsonMessageMapperTest {
     @Test
     void constantDomainWins() {
         ConnectorProperties properties = properties();
-        properties.getMapping().setDomainConstant("fixed/domain");
+        properties.getMapping().getCommon().setDomainConstant("fixed/domain");
 
         assertEquals("fixed/domain", new JsonMessageMapper(properties)
                 .map("{\"value\":\"1\",\"type\":\"x\",\"domain\":\"other\"}".getBytes()).domain());
@@ -115,13 +115,13 @@ class JsonMessageMapperTest {
         properties.setOperation("CREATE_PSEUDONYM");
         properties.setSourceTopic("source");
         properties.setGroupId("group");
-        properties.getMapping().setDomainPath("/domain");
-        properties.getMapping().setIdentifierPath("/value");
-        properties.getMapping().setIdTypePath("/type");
-        properties.getMapping().setValidityTimePath("/validity");
-        properties.getMapping().setValidFromPath("/time");
-        properties.getMapping().setSourceTimezone("Europe/Berlin");
-        properties.getMapping().setDatetimeFormat("uuuu-MM-dd HH:mm:ss.SSS");
+        properties.getMapping().getCommon().setDomainPath("/domain");
+        properties.getMapping().getCommon().setIdentifierPath("/value");
+        properties.getMapping().getCommon().setIdTypePath("/type");
+        properties.getMapping().getCommon().setValidityTimePath("/validity");
+        properties.getMapping().getCommon().setValidFromPath("/time");
+        properties.getMapping().getCommon().setSourceTimezone("Europe/Berlin");
+        properties.getMapping().getCommon().setDatetimeFormat("uuuu-MM-dd HH:mm:ss.SSS");
         return properties;
     }
 }

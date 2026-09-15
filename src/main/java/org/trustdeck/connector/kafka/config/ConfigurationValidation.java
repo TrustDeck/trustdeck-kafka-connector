@@ -75,20 +75,21 @@ public class ConfigurationValidation {
         }
         boolean pseudonym = operation.equals("CREATE_PSEUDONYM") || operation.equals("UPDATE_PSEUDONYM")
                 || operation.equals("DELETE_PSEUDONYM");
-        if (pseudonym && blank(properties.getMapping().getIdentifierPath())
+        if (pseudonym && blank(properties.getMapping().getCommon().getIdentifierPath())
                 && !operation.equals("DELETE_PSEUDONYM")) {
             throw new IllegalArgumentException("identifierPath is required for pseudonym operations.");
         }
-        if (pseudonym && blank(properties.getMapping().getIdTypePath())
+        if (pseudonym && blank(properties.getMapping().getCommon().getIdTypePath())
                 && !operation.equals("DELETE_PSEUDONYM")) {
             throw new IllegalArgumentException("idTypePath is required for pseudonym create/update operations.");
         }
-        if (operation.equals("DELETE_PSEUDONYM") && blank(properties.getMapping().getPsnPath())
-                && (blank(properties.getMapping().getIdentifierPath()) || blank(properties.getMapping().getIdTypePath()))) {
+        if (operation.equals("DELETE_PSEUDONYM") && blank(properties.getMapping().getCommon().getPsnPath())
+                && (blank(properties.getMapping().getCommon().getIdentifierPath())
+                || blank(properties.getMapping().getCommon().getIdTypePath()))) {
             throw new IllegalArgumentException("delete pseudonym needs psnPath or identifierPath and idTypePath.");
         }
-        if (operation.equals("UPDATE_PSEUDONYM") && (blank(properties.getMapping().getOldIdentifierPath())
-                || blank(properties.getMapping().getOldIdTypePath()))) {
+        if (operation.equals("UPDATE_PSEUDONYM") && (blank(properties.getMapping().getUpdatePseudonym().getOldIdentifierPath())
+                || blank(properties.getMapping().getUpdatePseudonym().getOldIdTypePath()))) {
             throw new IllegalArgumentException("update pseudonym requires old identifier and id type mappings.");
         }
         if (operation.equals("CREATE_ENTITY") || operation.equals("UPDATE_ENTITY")
@@ -96,10 +97,11 @@ public class ConfigurationValidation {
             if (blank(properties.getTrustdeck().getProject())) {
                 throw new IllegalArgumentException("trustdeck.project is required for entity operations.");
             }
-            if (blank(properties.getTrustdeck().getEntityType()) && blank(properties.getMapping().getEntityTypePath())) {
+            if (blank(properties.getTrustdeck().getEntityType())
+                    && blank(properties.getMapping().getCommon().getEntityTypePath())) {
                 throw new IllegalArgumentException("trustdeck.entity-type or mapping.entity-type-path is required for entity operations.");
             }
-            for (ConnectorProperties.FieldMapping field : properties.getMapping().getEntityFields()) {
+            for (ConnectorProperties.FieldMapping field : properties.getMapping().getCommon().getEntityFields()) {
                 if (field == null || blank(field.getSourcePath()) || blank(field.getTargetPath())) {
                     throw new IllegalArgumentException("Entity field mappings require sourcePath and targetPath.");
                 }

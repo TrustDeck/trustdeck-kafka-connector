@@ -15,7 +15,7 @@ Proposed files/packages:
 - `trustdeck`: client/token adapter, preflight and bounded dynamic-target cache.
 - `kafka`: consumer/producer factories, manual acknowledgment, pause/resume outage state, recovery/DLT/review envelopes.
 - `notification`: optional bounded SMTP incident/recovery notifications.
-- `src/main/resources/application.yaml`, `examples/`, `docker/`, `compose.yaml`, `compose.trustdeck-network.yaml`, `README.md`, `LICENSE`, `.env.example`, `.gitignore`, `.gitattributes`.
+- `src/main/resources/application.yaml`, `src/main/resources/example-pseudonymization.yaml`, `docker/`, `README.md`, `LICENSE`, `.env.example`, `.gitignore`, `.gitattributes`.
 - Tests: unit mapping/time/operation tests, controlled HTTP-stub client contract tests, and disposable Kafka/Testcontainers integration tests.
 
 The success path is centralized so a future result publisher can receive the source correlation and returned TrustDeck object without changing operation code. There is deliberately no result topic now.
@@ -90,7 +90,7 @@ recovery:
   review-topic: ${KAFKA_REVIEW_TOPIC:${KAFKA_TOPIC}.REVIEW}
 ```
 
-The classpath `application.yaml` is generic: it has no sample field, domain, project, entity-type, timestamp format, username, host, or credential defaults. The selected operation controls validation. Pseudonym operations do not require project/entity mappings; optional psn/validity/provenance mappings may be absent; a nonblank constant domain works without a domain path; missing required settings fail startup clearly. `examples/sample-pseudonym.yaml` explicitly maps `/c_source_domain`, `/c_value`, `/c_type_of_pseudonym`, `/c_pseudonym`, `/t_timestamp`, and `Europe/Berlin` with the sample format. Maven does not source `.env` automatically. The implementation supports any configured domain path and constant override without translation.
+The classpath `application.yaml` is generic: it has no sample field, domain, project, entity-type, timestamp format, username, host, or credential defaults. The selected operation controls validation. Pseudonym operations do not require project/entity mappings; optional psn/validity/provenance mappings may be absent; a nonblank constant domain works without a domain path; missing required settings fail startup clearly. `src/main/resources/example-pseudonymization.yaml` explicitly maps `/c_source_domain`, `/c_value`, `/c_type_of_pseudonym`, `/c_pseudonym`, `/t_timestamp`, and `Europe/Berlin` with the sample format. Maven does not source `.env` automatically. The implementation supports any configured domain path and constant override without translation.
 
 ## Time and Input Rules
 
@@ -112,7 +112,7 @@ Use Java 21, Spring Boot 3.5.16 and its managed Spring Kafka line, Jackson/Lombo
 
 Tests will exercise all seven operations against a controlled HTTP stub using the real client, including serialization/status 200/201/206, strict mapping and time conversion, leading zeros, update/delete selectors, combined automatic pseudonym behavior and stage-two replay, true linkage conflicts versus unrelated 409, ambiguous reads, and partial-batch correlation. Disposable uniquely named Kafka/Testcontainers resources will verify partition order, concurrency, manual offsets, DLT/review confirmation and producer failure, restart redelivery, outage pause/heartbeat/recovery, committed versus earliest offsets, bounded polls/large inputs, token refresh/expiry, and SMTP failure/suppression. No existing TrustDeck/PostgreSQL/Keycloak/Kafka service or production backlog is used.
 
-Verification includes clean `./mvnw verify`, strict Javadocs including private members and test-source checks, dependency/license review (`./mvnw org.codehaus.mojo:license-maven-plugin:2.7.0:add-third-party -Dlicense.includedScopes=compile,runtime`), `git diff --check`, Compose config validation, Docker build without host Maven-cache reliance, and disposable readiness/liveness checks. Unavailable credentials/services will be reported as unverified with exact commands.
+Verification includes clean `mvn verify`, strict Javadocs including private members and test-source checks, dependency/license review (`mvn org.codehaus.mojo:license-maven-plugin:2.7.0:add-third-party -Dlicense.includedScopes=compile,runtime`), `git diff --check`, Compose config validation, Docker build without host Maven-cache reliance, and disposable readiness/liveness checks. Unavailable credentials/services will be reported as unverified with exact commands.
 
 ## Implementation Checklist
 
@@ -123,7 +123,7 @@ This checklist is maintained against the complete approved scope, not just compi
 - Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, instance template, and baseline documentation.
 - Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
 - TrustDeck client adapter with OAuth client-credentials token caching, finite connect/read timeout configuration, and bounded `Retry-After` propagation.
-- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka, fresh-context restart, and recovery publisher/notification tests pass. `./mvnw clean verify` passes with 47 tests.
+- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka, fresh-context restart, and recovery publisher/notification tests pass. `mvn clean verify` passes with 47 tests.
 - Strict Javadocs, `git diff --check`, Compose config validation, Docker build, isolated container liveness/readiness probes, and client `mvn clean verify` pass.
 - Client timeout and `Retry-After` changes are isolated on `feature/http-timeouts`, with pinned build commit `0133ed9` and the client test suite passing 74 tests.
 
@@ -174,7 +174,7 @@ Add real recovery-producer fault injection and separate-JVM replay only if the d
 | D | `PseudonymBatchServiceTest` correlation/limit tests; listener batch classification test | Known partial success is not resubmitted; reduced and unmatched responses are rejected; reordered and repeated occurrences correlate safely; serialized UTF-8 byte limits are enforced; deterministic rejection routes to DLT. | No broker-backed unsafe-206 publication/offset test. |
 | E | `OutageCoordinatorTest.probesFailedDynamicTargetsBeforeResume`, preflight integration, health and notification tests | Dynamic failed targets are rechecked before resume; health and SMTP isolation tests pass. | No live broker pause/heartbeat/resume outage test. |
 | F | `OperationServiceHttpTest` (10 tests), `JsonMessageMapperTest` (8 tests), client suite evidence | All seven operation branches, validity-time serialization, selectors, preserved types, malformed UTF-8, trailing JSON, roots, and DST gap/overlap behavior pass. | Remaining exact payload/status and backend ambiguity cases are not fully covered. |
-| G | `./mvnw clean verify`; license report; both Compose configs; isolated Docker build | 47 tests, no skips, Javadocs, Compose validation, dependency report review, and clean pinned-client Docker build pass. | Live backend permissions/resources remain deployment-only. |
+| G | `mvn clean verify`; license report; both Compose configs; isolated Docker build | 47 tests, no skips, Javadocs, Compose validation, dependency report review, and clean pinned-client Docker build pass. | Live backend permissions/resources remain deployment-only. |
 
 ## Proposed Commits
 

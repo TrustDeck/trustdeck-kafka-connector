@@ -63,8 +63,8 @@ public class TrustDeckPreflight {
                 verifyEntityType(properties.getTrustdeck().getProject(), properties.getTrustdeck().getEntityType());
             }
         }
-        if (requiresDomain(operation) && !blank(properties.getMapping().getDomainConstant())) {
-            verifyDomain(properties.getMapping().getDomainConstant());
+        if (requiresDomain(operation) && !blank(properties.getMapping().getCommon().getDomainConstant())) {
+            verifyDomain(properties.getMapping().getCommon().getDomainConstant());
         }
     }
 

@@ -18,9 +18,9 @@ class ConfigurationValidationTest {
     @Test
     void pseudonymConstantDomainDoesNotNeedEntitySettings() {
         ConnectorProperties properties = base("CREATE_PSEUDONYM");
-        properties.getMapping().setDomainConstant("synthetic-domain");
-        properties.getMapping().setIdentifierPath("/identifier");
-        properties.getMapping().setIdTypePath("/idType");
+        properties.getMapping().getCommon().setDomainConstant("synthetic-domain");
+        properties.getMapping().getCommon().setIdentifierPath("/identifier");
+        properties.getMapping().getCommon().setIdTypePath("/idType");
 
         assertDoesNotThrow(() -> new ConfigurationValidation(properties));
     }
@@ -29,7 +29,7 @@ class ConfigurationValidationTest {
     @Test
     void deleteRequiresIdentifierTypeWhenPsnIsAbsent() {
         ConnectorProperties properties = base("DELETE_PSEUDONYM");
-        properties.getMapping().setIdentifierPath("/identifier");
+        properties.getMapping().getCommon().setIdentifierPath("/identifier");
 
         assertThrows(IllegalArgumentException.class, () -> new ConfigurationValidation(properties));
     }
@@ -47,7 +47,7 @@ class ConfigurationValidationTest {
     @Test
     void entityOperationRequiresProject() {
         ConnectorProperties properties = base("CREATE_ENTITY");
-        properties.getMapping().setEntityTypePath("/entityType");
+        properties.getMapping().getCommon().setEntityTypePath("/entityType");
 
         assertThrows(IllegalArgumentException.class, () -> new ConfigurationValidation(properties));
     }
@@ -61,7 +61,7 @@ class ConfigurationValidationTest {
         ConnectorProperties.FieldMapping field = new ConnectorProperties.FieldMapping();
         field.setSourcePath("/source");
         field.setTargetPath("/data/");
-        properties.getMapping().setEntityFields(java.util.List.of(field));
+        properties.getMapping().getCommon().setEntityFields(java.util.List.of(field));
 
         assertThrows(IllegalArgumentException.class, () -> new ConfigurationValidation(properties));
     }

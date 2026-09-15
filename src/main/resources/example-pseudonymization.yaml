@@ -9,10 +9,11 @@ connector:
     client-id: replace-me
     client-secret: replace-me
   mapping:
-    domain-path: /c_source_domain
-    identifier-path: /c_value
-    id-type-path: /c_type_of_pseudonym
-    psn-path: /c_pseudonym
-    valid-from-path: /t_timestamp
-    source-timezone: Europe/Berlin
-    datetime-format: uuuu-MM-dd HH:mm:ss.SSS
+    common:
+      domain-path: /c_source_domain
+      identifier-path: /c_value
+      id-type-path: /c_type_of_pseudonym
+      psn-path: /c_pseudonym
+      valid-from-path: /t_timestamp
+      source-timezone: Europe/Berlin
+      datetime-format: uuuu-MM-dd HH:mm:ss.SSS

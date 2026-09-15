@@ -8,7 +8,6 @@ RUN git clone https://github.com/TrustDeck/trustdeck-client.git /tmp/trustdeck-c
 COPY pom.xml .
 RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml,required=false mvn -B dependency:go-offline
 COPY src src
-COPY examples examples
 RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml,required=false mvn -B clean package -DskipTests
 
 FROM eclipse-temurin:21-jre-jammy
