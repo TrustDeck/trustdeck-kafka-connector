@@ -73,6 +73,8 @@ connector:
   read-timeout: ${TRUSTDECK_READ_TIMEOUT:30s}
   preflight:
     enabled: ${CONNECTOR_PREFLIGHT_ENABLED:true}
+  replay:
+    enabled: ${CONNECTOR_REPLAY_ENABLED:false}
   trustdeck:
     service-url: ${TRUSTDECK_SERVICE_URL}
     token-endpoint: ${KEYCLOAK_TOKEN_ENDPOINT}

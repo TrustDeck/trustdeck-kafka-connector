@@ -106,7 +106,7 @@ Review publication is terminal only after broker confirmation and uses `PENDING_
 
 Use Java 21, Spring Boot 3.5.16 and its managed Spring Kafka line, Jackson/Lombok, Actuator, validation, mail, the TrustDeck client development build, and Testcontainers/JUnit in test scope. Boot 3.5 is selected because it remains compatible with Spring Framework 6.2 used by the client. Direct dependency/plugin comments will state actual purpose and license. MIT/BSD/Apache-2.0 and permitted EPL-2.0 components are acceptable; no EPL component is described as Apache relicensed. The client runtime `slf4j-simple` must be excluded so Boot supplies one logging backend.
 
-`org.trustdeck:client:1.0.2-SNAPSHOT` is a local development coordinate only and must not overwrite or impersonate released `1.0.1`. It contains the approved optional transport timeout feature: connect default 5 seconds and response-read default 30 seconds, with backward-compatible constructors. The sibling client change is on a separate feature branch, tested but unpublished. Maven and Docker use a reproducible pinned-source build/install path until publication; no client credentials convenience API is added.
+`org.trustdeck:client:1.0.2-SNAPSHOT` is a local development coordinate only and must not overwrite or impersonate released `1.0.1`. It contains the approved optional transport timeout and `Retry-After` response features: connect default 5 seconds and response-read default 30 seconds, with backward-compatible constructors. The sibling client change is on a separate feature branch, tested but unpublished. Maven and Docker use reproducible pinned-source build/install path at client commit `0133ed9` until publication; no client credentials convenience API is added.
 
 ## Tests and Verification
 
@@ -123,9 +123,9 @@ This checklist is maintained against the complete approved scope, not just compi
 - Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, instance template, and baseline documentation.
 - Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
 - TrustDeck client adapter with OAuth client-credentials token caching, finite connect/read timeout configuration, and bounded `Retry-After` propagation.
-- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka and recovery publisher/notification tests pass. `./mvnw clean verify` passes with 34 tests.
+- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka, fresh-context restart, and recovery publisher/notification tests pass. `./mvnw clean verify` passes with 44 tests.
 - Strict Javadocs, `git diff --check`, Compose config validation, Docker build, isolated container liveness/readiness probes, and client `mvn clean verify` pass.
-- Client timeout and `Retry-After` changes are isolated on `feature/http-timeouts`, commits `5ca64d7` and `0133ed9`, with the client test suite passing 74 tests.
+- Client timeout and `Retry-After` changes are isolated on `feature/http-timeouts`, with pinned build commit `0133ed9` and the client test suite passing 74 tests.
 
 ### Implemented but not verified
 
@@ -138,8 +138,8 @@ This checklist is maintained against the complete approved scope, not just compi
 ### Missing or incomplete
 
 - Verification of terminal handling for unsafe batch outcomes remains incomplete.
-- Broker-level recovery producer-failure tests and replay execution from stage/UUID metadata after process restart remain incomplete.
-- Meaningful Kafka/Testcontainers restart/producer-failure/outage/offset integration tests and unsafe partial 206 tests. `ConnectorKafkaIntegrationTest` now proves real listener processing, HTTP effect, confirmed DLT publication, two-container concurrency, and broker-observed commits.
+- Broker-level recovery producer-failure tests and replay execution from stage/UUID metadata after a separate JVM process remain incomplete.
+- `ConnectorRestartIntegrationTest.preservesCommittedPrefixAndRedeliversBlockedRecord` proves fresh Spring connector contexts, retained broker/group state, committed-prefix preservation, blocked-record offset retention, redelivery, and eventual commit. `ConnectorKafkaIntegrationTest` proves real listener processing, HTTP effect, confirmed DLT publication, two-container concurrency, and broker-observed commits. Real recovery-producer outage, broker unsafe-206, and abrupt process-kill tests remain incomplete.
 - Remaining exact HTTP path/payload assertions and ambiguous-read/linkage-conflict tests; pseudonym-create path/payload coverage is complete.
 - Dependency/license report and complete operation-specific environment documentation are documented; the report generates successfully with the unpublished client license metadata recognized.
 
@@ -154,15 +154,27 @@ This checklist is maintained against the complete approved scope, not just compi
 - Mapping/timezone: implementation `JsonMessageMapper`; behavioral test `JsonMessageMapperTest` covers validity-time mapping and omission; malformed-input breadth remains missing, while target-path validation is covered by `ConfigurationValidationTest`.
 - Batch/206: implementation `PseudonymBatchService`; behavioral test `PseudonymBatchServiceTest`; unsafe/reduced response and broker outcome tests remain missing.
 - Offsets/recovery: implementation `ConnectorListener`, `RecoveryPublisher`, and `RecoveryEnvelope`; behavioral tests cover recovery producer propagation and source-ack protection, while `ConnectorKafkaIntegrationTest` proves real listener processing, confirmed DLT publication, and broker-observed commits; broker restart and producer-failure tests are missing.
-- Combined/replay: implementation `OperationService` and `ManualReplayService`; `OperationServiceHttpTest` proves stage-two replay without another entity create; restart/process-boundary replay coverage is missing.
-- Outage/health: implementation `OutageCoordinator`, `TrustDeckPreflight`, and `ConnectorHealthIndicator`; `ConnectorKafkaIntegrationTest` exercises authenticated startup preflight and `HealthEndpointTest` proves HTTP endpoints, but pause/resume with a broker is untested.
+- Combined/replay: implementation `OperationService`, `ManualReplayService`, and guarded `ManualReplayController`; `OperationServiceHttpTest.replaysCombinedOperationWithoutCreatingAnotherEntity` and `replayUsesPreservedValueAcrossProcessBoundary` prove UUID restoration and preserved-byte validation. Separate-JVM replay execution remains missing.
+- Outage/health: implementation `OutageCoordinator`, `TrustDeckPreflight`, and `ConnectorHealthIndicator`; `OutageCoordinatorTest.probesFailedDynamicTargetsBeforeResume` proves target-aware authenticated recovery probing, while `ConnectorKafkaIntegrationTest` exercises authenticated startup preflight and `HealthEndpointTest` proves HTTP endpoints. Pause/heartbeat/resume with a live broker remains untested.
 - Configuration: implementation `ConfigurationValidation`; behavioral test `ConfigurationValidationTest`; `ConnectorKafkaIntegrationTest` exercises authenticated startup and dynamic-target preflight against the HTTP stub.
-- Client timeout/token: implementation sibling client commits `5ca64d7` and `0133ed9`; client suite proves timeout behavior, endpoint contracts, and `Retry-After` propagation, while `ClientCredentialsTokenProviderTest` proves expiry refresh against a controlled token endpoint.
+- Client timeout/token: implementation sibling client pinned commit `0133ed9`; client suite proves timeout behavior, endpoint contracts, and `Retry-After` propagation, while `ClientCredentialsTokenProviderTest` proves expiry refresh against a controlled token endpoint.
 - SMTP: implementation `NotificationService`/`OutageCoordinator`; `NotificationServiceTest` proves recipient suppression, transport-failure isolation, cooldown suppression, and uncapped recovery notification.
 
 ### Next concrete action
 
-Add broker-backed offset/restart/producer-failure tests; then implement exact replay execution from confirmed combined-stage envelopes.
+Add real recovery-producer fault injection and separate-JVM replay only if the deployment test harness can isolate the producer transport and expose the guarded operator endpoint; the locally runnable fresh-context offset/replay and unit evidence are complete.
+
+### A-G Evidence Matrix
+
+| Section | Implementation and evidence | Observed result | Remaining boundary |
+|---|---|---|---|
+| A | `ConnectorRestartIntegrationTest.preservesCommittedPrefixAndRedeliversBlockedRecord`; `ConnectorKafkaIntegrationTest` | Fresh contexts retain group offsets; source HTTP markers are `committed`, `blocked`, `blocked`; blocked next-offset stays at the committed prefix; later commit advances after recovery. Repeated twice. | Context restart is not an abrupt JVM/process kill; multi-record blocked batch is not separately exercised. |
+| B | `ConnectorListenerTest.pausesWhenRecoveryPublicationFails`, `pausesWhenRecoveryPublicationFails`; `RecoveryPublisherTest` | Source acknowledgment is withheld and outage state is requested when publication fails. | No real broker ACL/network isolation test for DLT and review publication. |
+| C | `ManualReplayService`, `ManualReplayController`, `OperationServiceHttpTest.replaysCombinedOperationWithoutCreatingAnotherEntity`, `replayUsesPreservedValueAcrossProcessBoundary` | Preserved `valueBase64` is decoded, mismatched caller bytes are rejected, completed UUID restores stage two, and no second entity create occurs. | No separate JVM/container operator invocation test. |
+| D | `PseudonymBatchServiceTest.fallsBackToSinglesForKnownPartialResponse`, `rejectsReducedPartialResponse`, `rejectsUtf8BatchAboveByteLimit`; listener batch classification test | Known partial success is not resubmitted; reduced responses are rejected; serialized UTF-8 byte limits are enforced; deterministic rejection routes to DLT. | No broker-backed unsafe-206 publication/offset test; no complete reordered/repeated/unmatched matrix. |
+| E | `OutageCoordinatorTest.probesFailedDynamicTargetsBeforeResume`, preflight integration, health and notification tests | Dynamic failed targets are rechecked before resume; health and SMTP isolation tests pass. | No live broker pause/heartbeat/resume outage test. |
+| F | `OperationServiceHttpTest` (10 tests), `JsonMessageMapperTest` (8 tests), client suite evidence | All seven operation branches, validity-time serialization, selectors, preserved types, malformed UTF-8, trailing JSON, roots, and DST gap/overlap behavior pass. | Remaining exact payload/status and backend ambiguity cases are not fully covered. |
+| G | `./mvnw clean verify`; license report; both Compose configs; isolated Docker build | 44 tests, no skips, Javadocs, Compose validation, dependency report review, and clean pinned-client Docker build pass. | Live backend permissions/resources remain deployment-only. |
 
 ## Proposed Commits
 

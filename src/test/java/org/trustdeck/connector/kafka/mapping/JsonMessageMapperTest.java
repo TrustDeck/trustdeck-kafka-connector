@@ -75,6 +75,36 @@ class JsonMessageMapperTest {
         assertThrows(MappingException.class, () -> new JsonMessageMapper(properties).map("[]".getBytes()));
     }
 
+    /** Rejects malformed UTF-8 before JSON parsing can replace bytes. */
+    @Test
+    void rejectsMalformedUtf8() {
+        ConnectorProperties properties = properties();
+        assertThrows(MappingException.class, () -> new JsonMessageMapper(properties)
+                .map(new byte[] {(byte) 0xc3, (byte) 0x28}));
+    }
+
+    /** Rejects trailing JSON values instead of silently accepting the first object. */
+    @Test
+    void rejectsTrailingJson() {
+        ConnectorProperties properties = properties();
+        assertThrows(MappingException.class, () -> new JsonMessageMapper(properties)
+                .map("{\"value\":\"1\",\"type\":\"x\",\"domain\":\"d\"} {}".getBytes()));
+    }
+
+    /** Rejects a primitive root because Kafka records must contain one JSON object. */
+    @Test
+    void rejectsPrimitiveRoot() {
+        assertThrows(MappingException.class, () -> new JsonMessageMapper(properties()).map("true".getBytes()));
+    }
+
+    /** Rejects an ambiguous Berlin overlap. */
+    @Test
+    void rejectsBerlinDstOverlap() {
+        ConnectorProperties properties = properties();
+        assertThrows(MappingException.class, () -> new JsonMessageMapper(properties)
+                .map("{\"value\":\"1\",\"type\":\"x\",\"domain\":\"d\",\"time\":\"2025-10-26 02:30:00.000\"}".getBytes()));
+    }
+
     /**
      * Creates the approved synthetic pseudonym mapping.
      *

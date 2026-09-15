@@ -6,11 +6,11 @@ This Apache-2.0 application consumes one Kafka topic with one configured operati
 
 Prerequisites are Java 21, Maven 3.9+, Docker/Compose, Kafka ACLs, and an existing TrustDeck project/type/domain. Use a confidential Keycloak client with service accounts and client-credentials access. Grant the exact resource permissions listed in `PLAN.md`; the JWT subject must be the TrustDeck service-account user's UUID. Keycloak realm-admin roles alone do not grant TrustDeck permissions.
 
-The released client `1.0.1` is not in Maven Central. This repository uses the approved, unpublished client commit `5ca64d7` as `1.0.2-SNAPSHOT`:
+The released client `1.0.1` is not in Maven Central. This repository uses the approved, unpublished client commit `0133ed9` as `1.0.2-SNAPSHOT`:
 
 ```sh
 git clone https://github.com/TrustDeck/trustdeck-client.git
-git -C trustdeck-client checkout --detach 5ca64d7
+git -C trustdeck-client checkout --detach 0133ed9
 mvn -f trustdeck-client/pom.xml clean install
 ./mvnw clean verify
 ```
@@ -18,7 +18,7 @@ mvn -f trustdeck-client/pom.xml clean install
 For authenticated GitHub Packages instead, configure Maven `settings.xml` with a read token and change the client version to a published coordinate. Never put credentials in the POM, image, build args, or history. Docker clones and builds the pinned client commit in a disposable builder stage; it does not use the host Maven cache:
 
 ```sh
-DOCKER_BUILDKIT=1 docker build --build-arg TRUSTDECK_CLIENT_REF=5ca64d7 -t trustdeck-kafka-connector:1.0.0 .
+DOCKER_BUILDKIT=1 docker build --build-arg TRUSTDECK_CLIENT_REF=0133ed9 -t trustdeck-kafka-connector:1.0.0 .
 ```
 
 Maven does not source `.env`. In WSL:
@@ -65,9 +65,9 @@ HTTP calls use finite client timeouts. Record mapping failures go directly to DL
 
 ### Manual Replay
 
-There is no public replay endpoint or command in this application. Manual replay is an operator procedure using the internal `ManualReplayService` or an equivalent controlled tool. First stop or isolate the normal source consumer, preserve the envelope, and confirm that its `status` is `FAILED_DLT`, its `operation` and `resolvedTarget` match the instance being used, and its `failureCategory` is not `UNKNOWN_OUTCOME`. Do not replay `PENDING_LINKAGE_REVIEW` until linkage has been reconciled. Decode `valueBase64` to the original Kafka value bytes; do not reconstruct JSON or use the envelope JSON as the source record.
+Manual replay is an explicit operator procedure. For a controlled administrative process, set `CONNECTOR_REPLAY_ENABLED=true`, restrict `/internal/replay` to the operator network, and POST the complete recovery envelope JSON to `POST /internal/replay`. The endpoint decodes and uses the envelope's preserved `valueBase64`; caller-supplied replacement bytes are not accepted. First stop or isolate the normal source consumer, preserve the envelope, and confirm that its `status` is `FAILED_DLT`, its `operation` and `resolvedTarget` match the instance being used, and its `failureCategory` is not `UNKNOWN_OUTCOME`. Do not replay `PENDING_LINKAGE_REVIEW` until linkage has been reconciled.
 
-Republish those original bytes to a dedicated replay topic with the same operation and mapping configuration, a distinct consumer group, and restricted ACLs. Monitor the replay result and retain the recovery record separately; never point a replay instance at the production source topic. For `CREATE_ENTITY_AND_PSEUDONYM`, replay is valid only when the envelope has `completedStage: ENTITY_CREATED` and `completedUuid`; reconcile that UUID and run stage two, or investigate first. Ordinary republishing cannot carry this metadata by itself, so a tool that does not invoke the replay service must implement the same guarded stage-two procedure.
+For a non-HTTP controlled tool, decode those original bytes to a dedicated replay process with the same operation and mapping configuration, a distinct consumer group, and restricted ACLs. Monitor the replay result and retain the recovery record separately; never point a replay instance at the production source topic. For `CREATE_ENTITY_AND_PSEUDONYM`, replay is valid only when the envelope has `completedStage: ENTITY_CREATED` and `completedUuid`; the endpoint restores that UUID and runs stage two, or rejects the envelope. Ordinary republishing cannot carry this metadata by itself, so it must not be used for combined replay.
 
 Production outage handling must pause consumption rather than drain records to DLT; the readiness health indicator reports a pause while liveness remains up. SMTP is optional and disabled with an empty `SMTP_TO`; mail failure never acknowledges data. The current minimal listener retains uncommitted data on failed publication. Docker restart policies do not restart an unhealthy-but-running container, so use an external watchdog carefully and do not erase intentional pauses with a restart loop.
 

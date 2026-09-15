@@ -84,6 +84,9 @@ public class PseudonymBatchService {
             throw new IllegalArgumentException("Pseudonym batch cannot be serialized.", exception);
         }
         BatchResult<Pseudonym> result = client.pseudonyms(domain).createBatch(request, false);
+        if (result == null || result.items() == null) {
+            throw new IllegalStateException("Pseudonym batch response is missing its result items.");
+        }
         Map<String, Queue<Integer>> occurrences = new HashMap<>();
         for (int index = 0; index < messages.size(); index++) {
             occurrences.computeIfAbsent(key(messages.get(index)), ignored -> new ArrayDeque<>()).add(index);

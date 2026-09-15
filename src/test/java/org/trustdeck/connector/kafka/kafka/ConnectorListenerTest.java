@@ -75,7 +75,7 @@ class ConnectorListenerTest {
         assertThrows(Exception.class, () -> new ConnectorListener(mapper, operations, recovery, properties, batches, outage)
                 .onMessage(List.of(source), acknowledgment));
 
-        verify(outage).pause("BACKEND_UNAVAILABLE");
+        verify(outage).pause("BACKEND_UNAVAILABLE", "domain", "entity", null);
         verify(acknowledgment, never()).acknowledge(0);
         verify(recovery, never()).publishDlt(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt(),
@@ -103,6 +103,33 @@ class ConnectorListenerTest {
 
         verify(outage).pause("RECOVERY_PRODUCER_UNAVAILABLE");
         verify(acknowledgment, never()).acknowledge(0);
+    }
+
+    /** Sends a deterministic batch rejection to DLT rather than labeling it unknown. */
+    @Test
+    void classifiesRejectedBatchAsDlt() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        RecoveryPublisher recovery = mock(RecoveryPublisher.class);
+        ConnectorProperties properties = properties("CREATE_PSEUDONYM");
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        OutageCoordinator outage = mock(OutageCoordinator.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        ConsumerRecord<byte[], byte[]> first = record(0, new byte[] {1});
+        ConsumerRecord<byte[], byte[]> second = record(1, new byte[] {2});
+        when(mapper.map(first.value())).thenReturn(mapped());
+        when(mapper.map(second.value())).thenReturn(mapped());
+        org.mockito.Mockito.doThrow(new IllegalArgumentException("batch rejected")).when(batches)
+                .execute(org.mockito.ArgumentMatchers.anyList());
+
+        new ConnectorListener(mapper, operations, recovery, properties, batches, outage)
+                .onMessage(List.of(first, second), acknowledgment);
+
+        verify(recovery, org.mockito.Mockito.times(2)).publishDlt(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("TRANSIENT_OPERATION_FAILURE"),
+                org.mockito.ArgumentMatchers.eq(0), org.mockito.ArgumentMatchers.any(IllegalArgumentException.class));
+        verify(recovery, never()).publishUnknown(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
     private ConnectorProperties properties(String operation) {

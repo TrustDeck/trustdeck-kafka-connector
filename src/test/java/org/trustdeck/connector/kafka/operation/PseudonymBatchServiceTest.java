@@ -7,6 +7,7 @@
 package org.trustdeck.connector.kafka.operation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -29,6 +30,7 @@ class PseudonymBatchServiceTest {
     private HttpServer server;
     private int singleCreates;
     private String batchBody;
+    private String responseMode = "partial";
 
     @BeforeEach
     void start() throws IOException {
@@ -73,6 +75,33 @@ class PseudonymBatchServiceTest {
         assertEquals(true, batchBody.contains("\"validityTime\":\"1d\""));
     }
 
+    /** Rejects a reduced partial response instead of guessing its source occurrence. */
+    @Test
+    void rejectsReducedPartialResponse() {
+        responseMode = "reduced";
+        ConnectorProperties properties = new ConnectorProperties();
+        properties.setBatchSize(10);
+        properties.setBatchBytes(100_000);
+        TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
+
+        assertThrows(IllegalStateException.class, () -> new PseudonymBatchService(client, properties,
+                new ObjectMapper().registerModule(new JavaTimeModule())).execute(List.of(message("one", "p1"))));
+        assertEquals(0, singleCreates);
+    }
+
+    /** Enforces the serialized UTF-8 batch limit rather than a character count. */
+    @Test
+    void rejectsUtf8BatchAboveByteLimit() {
+        ConnectorProperties properties = new ConnectorProperties();
+        properties.setBatchSize(10);
+        properties.setBatchBytes(20);
+        TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
+
+        assertThrows(IllegalArgumentException.class, () -> new PseudonymBatchService(client, properties,
+                new ObjectMapper().registerModule(new JavaTimeModule())).execute(List.of(message("ä", "p1"))));
+        assertEquals(0, singleCreates);
+    }
+
     private MappedMessage message(String identifier, String psn) {
         return new MappedMessage("domain", identifier, "type", psn, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null);
@@ -89,7 +118,8 @@ class PseudonymBatchServiceTest {
         if (!batch) {
             singleCreates++;
         }
-        String response = "[{\"identifierItem\":{\"identifier\":\"one\",\"idType\":\"type\"},\"psn\":\"p1\"}]";
+        String response = responseMode.equals("reduced") ? "[{\"psn\":\"p1\"}]"
+                : "[{\"identifierItem\":{\"identifier\":\"one\",\"idType\":\"type\"},\"psn\":\"p1\"}]";
         if (!batch) {
             response = "{\"identifierItem\":{\"identifier\":\"two\",\"idType\":\"type\"},\"psn\":\"p2\"}";
         }

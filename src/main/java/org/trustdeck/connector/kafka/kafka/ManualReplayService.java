@@ -6,6 +6,8 @@
  */
 package org.trustdeck.connector.kafka.kafka;
 
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -42,6 +44,24 @@ public class ManualReplayService {
      */
     public Object replay(RecoveryEnvelope envelope, byte[] originalValue) {
         validate(envelope);
+        byte[] preservedValue = decodeValue(envelope);
+        if (!Arrays.equals(preservedValue, originalValue)) {
+            throw new IllegalArgumentException("Replay payload does not match the preserved source value.");
+        }
+        return replayValidated(envelope, preservedValue);
+    }
+
+    /** Replays from the byte-preserving envelope after a process restart.
+     * @param envelope recovery envelope
+     * @return TrustDeck operation result
+     */
+    public Object replay(RecoveryEnvelope envelope) {
+        validate(envelope);
+        return replayValidated(envelope, decodeValue(envelope));
+    }
+
+    /** Executes one already validated replay using the envelope's preserved source bytes. */
+    private Object replayValidated(RecoveryEnvelope envelope, byte[] originalValue) {
         MappedMessage mapped = mapper.map(originalValue);
         if (envelope.resolvedTarget() == null || !envelope.resolvedTarget().equals(mapped.domain())
                 || (envelope.targetProject() != null
@@ -71,6 +91,23 @@ public class ManualReplayService {
         if (properties.getOperation().equals("CREATE_ENTITY_AND_PSEUDONYM")
                 && (!"ENTITY_CREATED".equals(envelope.completedStage()) || envelope.completedUuid() == null)) {
             throw new IllegalArgumentException("Combined replay requires the confirmed entity stage and UUID.");
+        }
+        if (envelope.sourceTopic() == null || envelope.sourceTopic().isBlank() || envelope.partition() < 0
+                || envelope.offset() < 0 || envelope.valueBase64() == null) {
+            throw new IllegalArgumentException("Recovery envelope source identity and preserved value are required.");
+        }
+        if (envelope.schemaVersion().equals("2") && envelope.targetProject() == null
+                && properties.getOperation().contains("ENTITY")) {
+            throw new IllegalArgumentException("Schema-2 entity replay requires its target project.");
+        }
+    }
+
+    /** Decodes the original source value and rejects malformed operator input. */
+    private byte[] decodeValue(RecoveryEnvelope envelope) {
+        try {
+            return Base64.getDecoder().decode(envelope.valueBase64());
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("Recovery envelope contains invalid source value encoding.", exception);
         }
     }
 }

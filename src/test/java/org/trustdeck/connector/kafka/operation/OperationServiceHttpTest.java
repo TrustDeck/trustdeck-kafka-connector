@@ -20,6 +20,7 @@ package org.trustdeck.connector.kafka.operation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -180,6 +181,22 @@ class OperationServiceHttpTest {
         assertEquals(1, requestLog.stream().filter(path -> path.startsWith("POST") && path.contains("/pseudonyms")).count());
         assertEquals(0, requestLog.stream().filter(path -> path.contains("/entities/") && path.startsWith("POST"))
                 .count());
+    }
+
+    /** Decodes the preserved envelope value and rejects a caller-supplied replacement payload. */
+    @Test
+    void replayUsesPreservedValueAcrossProcessBoundary() {
+        properties.setOperation("CREATE_ENTITY_AND_PSEUDONYM");
+        properties.getMapping().setDomainConstant("source/domain");
+        RecoveryEnvelope envelope = new RecoveryEnvelope("1", "FAILED_DLT", "source", 0, 1,
+                null, "CREATE_ENTITY_AND_PSEUDONYM", "source/domain", "TRANSIENT_OPERATION_FAILURE", 503, 3,
+                "ENTITY_CREATED", "11111111-1111-1111-1111-111111111111", null,
+                java.util.Base64.getEncoder().encodeToString("{}".getBytes()), null, Map.of(), "replay");
+        ManualReplayService replay = new ManualReplayService(new JsonMessageMapper(properties),
+                new OperationService(client(), properties), properties);
+
+        assertNotNull(replay.replay(envelope));
+        assertThrows(IllegalArgumentException.class, () -> replay.replay(envelope, "{\"changed\":true}".getBytes()));
     }
 
     /**

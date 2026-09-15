@@ -39,9 +39,31 @@ public class OutageCoordinator {
     /** Pauses every source container without acknowledging the current record.
      * @param reason sanitized outage category
      */
-    public void pause(String reason) {
+    public synchronized void pause(String reason) {
+        pause(reason, null, null);
+    }
+
+    /** Pauses consumption and retains the dynamic target that caused the outage.
+     * @param reason sanitized outage category
+     * @param domain failed dynamic domain
+     * @param entityType failed dynamic entity type
+     */
+    public synchronized void pause(String reason, String domain, String entityType) {
+        pause(reason, domain, entityType, null);
+    }
+
+    /** Pauses consumption and retains dynamic targets and project identity for probing.
+     * @param reason sanitized outage category
+     * @param domain failed dynamic domain
+     * @param entityType failed dynamic entity type
+     * @param project failed dynamic entity project
+     */
+    public synchronized void pause(String reason, String domain, String entityType, String project) {
         boolean alreadyPaused = state.isPaused();
         state.setPaused(true, reason);
+        failedDomain = domain;
+        failedEntityType = entityType;
+        failedProject = project;
         registry.getListenerContainers().forEach(container -> {
             if (!container.isContainerPaused()) {
                 container.pause();
@@ -54,21 +76,39 @@ public class OutageCoordinator {
 
     /** Probes a configured read-only resource and resumes paused containers on success. */
     @Scheduled(fixedDelayString = "${connector.recovery.probe-interval:15s}")
-    public void probeAndResume() {
+    public synchronized void probeAndResume() {
         if (!state.isPaused()) {
             return;
         }
         try {
             preflight.verifyStaticResources();
+            if (failedDomain != null) {
+                preflight.verifyDomain(failedDomain);
+            }
+            if (failedEntityType != null) {
+                preflight.verifyEntityType(failedProject, failedEntityType);
+            }
             registry.getListenerContainers().forEach(container -> {
                 if (container.isContainerPaused()) {
                     container.resume();
                 }
             });
             state.setPaused(false, "");
+            failedDomain = null;
+            failedEntityType = null;
+            failedProject = null;
             notifications.send("TrustDeck recovered", "Authenticated read-only probe succeeded; consumption resumed.");
         } catch (RuntimeException ignored) {
             // Keep the source paused until an authenticated read-only probe succeeds.
         }
     }
+
+    /** Last dynamic domain that failed, if any. */
+    private volatile String failedDomain;
+
+    /** Last dynamic entity type that failed, if any. */
+    private volatile String failedEntityType;
+
+    /** Project associated with the failed dynamic entity-type probe. */
+    private volatile String failedProject;
 }

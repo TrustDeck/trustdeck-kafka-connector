@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 FROM maven:3.9.11-eclipse-temurin-21 AS build
 WORKDIR /build
-ARG TRUSTDECK_CLIENT_REF=5ca64d7
+ARG TRUSTDECK_CLIENT_REF=0133ed9
 RUN git clone https://github.com/TrustDeck/trustdeck-client.git /tmp/trustdeck-client \
     && git -C /tmp/trustdeck-client checkout --detach ${TRUSTDECK_CLIENT_REF} \
     && mvn -B -f /tmp/trustdeck-client/pom.xml install -DskipTests

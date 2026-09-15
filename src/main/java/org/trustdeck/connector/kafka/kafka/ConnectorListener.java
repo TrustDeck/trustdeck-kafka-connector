@@ -132,12 +132,18 @@ public class ConnectorListener {
                 batches.execute(mapped);
             } catch (Exception failure) {
                 if (systemic(failure)) {
-                    outage.pause(category(failure));
+                    outage.pause(category(failure), failedDomain(mapped), failedEntityType(mapped),
+                            properties.getTrustdeck().getProject());
                     throw failure;
                 }
+                boolean unknown = failure instanceof IllegalStateException;
                 for (int index = 0; index < records.size(); index++) {
-                    publishUnknown(records.get(index), mapped.get(index), failure,
-                            operations.completedUuid(correlation(records.get(index))));
+                    if (unknown) {
+                        publishUnknown(records.get(index), mapped.get(index), failure,
+                                operations.completedUuid(correlation(records.get(index))));
+                    } else {
+                        publishDlt(records.get(index), mapped.get(index), category(failure), 0, failure);
+                    }
                     acknowledgment.acknowledge(index);
                 }
                 return;
@@ -214,9 +220,13 @@ public class ConnectorListener {
             return false;
         }
         int partition = records.getFirst().partition();
-        String domain = mapped.getFirst().domain();
+        MappedMessage first = mapped.getFirst();
+        String domain = first.domain();
         return records.stream().allMatch(record -> record.partition() == partition)
-                && mapped.stream().allMatch(message -> domain.equals(message.domain()) && message.psn() != null);
+                && mapped.stream().allMatch(message -> domain.equals(message.domain()) && message.psn() != null
+                        && java.util.Objects.equals(first.validityTime(), message.validityTime())
+                        && java.util.Objects.equals(first.validFrom(), message.validFrom())
+                        && java.util.Objects.equals(first.validTo(), message.validTo()));
     }
 
     /**
@@ -231,7 +241,8 @@ public class ConnectorListener {
     private void retryOrDlt(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped,
                             Exception failure, Acknowledgment acknowledgment, int index) throws Exception {
         if (systemic(failure)) {
-            outage.pause(category(failure));
+            outage.pause(category(failure), mapped.domain(), mapped.entityType(),
+                    properties.getTrustdeck().getProject());
             throw failure;
         }
         int attempts = properties.getRecovery().getMaxAttempts();
@@ -247,7 +258,8 @@ public class ConnectorListener {
             } catch (Exception retryFailure) {
                 failure = retryFailure;
                 if (systemic(retryFailure)) {
-                    outage.pause(category(retryFailure));
+                    outage.pause(category(retryFailure), mapped.domain(), mapped.entityType(),
+                            properties.getTrustdeck().getProject());
                     throw retryFailure;
                 }
             }
@@ -356,6 +368,16 @@ public class ConnectorListener {
             outage.pause("RECOVERY_PRODUCER_UNAVAILABLE");
             throw publicationFailure;
         }
+    }
+
+    /** Returns the first dynamic domain involved in a failed batch. */
+    private String failedDomain(List<MappedMessage> mapped) {
+        return mapped.isEmpty() || mapped.getFirst() == null ? null : mapped.getFirst().domain();
+    }
+
+    /** Returns the first dynamic entity type involved in a failed batch. */
+    private String failedEntityType(List<MappedMessage> mapped) {
+        return mapped.isEmpty() || mapped.getFirst() == null ? null : mapped.getFirst().entityType();
     }
 
     /**
