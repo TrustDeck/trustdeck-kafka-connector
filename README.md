@@ -37,6 +37,10 @@ The root `config/instance` directory is retained for deployment-only overrides: 
 
 The explicit `server.shutdown: graceful` setting is retained because the application owns manual acknowledgments and recovery publication; graceful Spring shutdown gives those in-flight operations time to finish during the Compose 45-second stop grace period.
 
+## Permissions
+
+Grant the service-account user only the permissions required by the selected operation: `project:read`, `type:read`, and the enabled entity CRUD permissions for entity operations; `domain:read` on each configured domain; `pseudonym:create` for pseudonym creation and `pseudonym:create-batch` when batching is enabled; `pseudonym:read` and `pseudonym:delete` for exact lookup/deletion; `pseudonym:update` and `pseudonym:update-complete` when the corresponding update paths are enabled; `entity:list-pseudonyms` for combined creation; and `pseudonym:read`/`pseudonym:link` only where linked-pseudonym verification is configured. Do not grant domain/project/type creation, global administration, `entity:resolve-linkage`, `pseudonym:read-batch`, or `pseudonym:delete-batch`. Restrict DLT/review topic ACLs and retention separately.
+
 ## Mappings
 
 Values are JSON Pointers, with a bare top-level name accepted as shorthand. Constant domain configuration wins over the message path. Provide only the mappings required by the selected operation. Mappings used exclusively by other operations may be omitted. Optional mappings may also be omitted. Pseudonym operations require only the fields relevant to that operation. Entity operations require a fixed project and either a fixed entity type or mapped entity-type path. Entity data uses explicit field mappings and preserves numbers, booleans, objects, arrays, and strings including leading zeros. A root array, tombstone, primitive, invalid UTF-8/JSON, trailing JSON value, oversized value, missing required path, null, blank, or wrong type is rejected.
