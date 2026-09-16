@@ -61,6 +61,9 @@ class OperationServiceHttpTest {
     /** Status returned by the synthetic endpoint for the next operation. */
     private int responseStatus;
 
+    /** Makes domain-scoped GET return one pseudonym for selector lookup tests. */
+    private boolean lookupResponse;
+
     /**
      * Starts the controlled server.
      *
@@ -77,6 +80,7 @@ class OperationServiceHttpTest {
         properties.getTrustdeck().setProject("synthetic-project");
         properties.getTrustdeck().setEntityType("synthetic-type");
         responseStatus = 0;
+        lookupResponse = false;
     }
 
     /** Stops the controlled server. */
@@ -92,7 +96,7 @@ class OperationServiceHttpTest {
         Object result = service.execute(message());
 
         assertEquals("012-000000009-2", ((org.trustdeck.client.model.Pseudonym) result).getPsn());
-        assertEquals("POST /api/domains/source%2Fdomain/pseudonyms", requestLog.get(0));
+        assertEquals("POST /api/domains/source%2Fdomain/pseudonyms?omitPrefix=false", requestLog.get(0));
         com.fasterxml.jackson.databind.JsonNode body = new com.fasterxml.jackson.databind.ObjectMapper()
                 .readTree(requestBodies.get(0));
         assertEquals("0123456789", body.at("/identifierItem/identifier").asText());
@@ -140,6 +144,9 @@ class OperationServiceHttpTest {
 
         assertEquals(UUID.fromString("11111111-1111-1111-1111-111111111111"),
                 ((org.trustdeck.client.model.Entity) result).getTrustdeckID());
+        assertEquals("POST /api/projects/synthetic-project/entities/synthetic-type", requestLog.get(0));
+        assertEquals("0123456789", body(0).at("/data/caseNumber").asText());
+        assertEquals(1, body(0).size());
     }
 
     /** Verifies entity deletion uses the exact UUID endpoint and HTTP 204. */
@@ -149,13 +156,34 @@ class OperationServiceHttpTest {
         OperationService service = new OperationService(client(), properties);
 
         assertEquals(Boolean.TRUE, service.execute(message()));
+        assertEquals("DELETE /api/projects/synthetic-project/entities/synthetic-type/11111111-1111-1111-1111-111111111111",
+                requestLog.get(0));
+        assertEquals(0, body(0).size());
     }
 
     /** Verifies standard pseudonym update dispatch and replacement selectors. */
     @Test
     void updatesPseudonymThroughClient() {
         properties.setOperation("UPDATE_PSEUDONYM");
+        assertNotNull(new OperationService(client(), properties).execute(standardUpdateMessage()));
+        assertEquals("PUT /api/domains/source%2Fdomain/pseudonyms", requestLog.get(0));
+        assertEquals("old", body(0).at("/oldIdentifierItem/identifier").asText());
+        assertEquals("old-psn", body(0).at("/oldPsn").asText());
+        assertTrue(body(0).get("newIdentifierItem") == null);
+        assertTrue(body(0).get("newPsn") == null);
+        assertTrue(body(0).get("validTo") == null);
+    }
+
+    /** Verifies identifier/value replacement selects the complete-update endpoint without regeneration. */
+    @Test
+    void updatesPseudonymCompletelyThroughClient() {
+        properties.setOperation("UPDATE_PSEUDONYM");
         assertNotNull(new OperationService(client(), properties).execute(message()));
+        assertEquals("PUT /api/domains/source%2Fdomain/pseudonyms/complete?regeneratePseudonym=false", requestLog.get(0));
+        assertEquals("old", body(0).at("/oldIdentifierItem/identifier").asText());
+        assertEquals("new", body(0).at("/newIdentifierItem/identifier").asText());
+        assertEquals("new-psn", body(0).at("/newPsn").asText());
+        assertEquals("target/domain", body(0).at("/newDomainName").asText());
     }
 
     /** Verifies single-value pseudonym deletion rather than domain-wide deletion. */
@@ -163,6 +191,23 @@ class OperationServiceHttpTest {
     void deletesPseudonymThroughClient() {
         properties.setOperation("DELETE_PSEUDONYM");
         assertEquals(Boolean.TRUE, new OperationService(client(), properties).execute(message()));
+        assertEquals("DELETE /api/domains/source%2Fdomain/pseudonyms?psn=012-000000009-2", requestLog.get(0));
+        assertEquals(0, body(0).size());
+    }
+
+    /** Verifies identifier and id-type lookup precedes one exact pseudonym deletion. */
+    @Test
+    void looksUpAndDeletesOnePseudonymByIdentifier() {
+        lookupResponse = true;
+        properties.setOperation("DELETE_PSEUDONYM");
+        MappedMessage selected = new MappedMessage("source/domain", "0123456789", "case_number", null, null, null,
+                null, null, "synthetic-type", null, new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(),
+                null, null, null, null, null, null, null, null);
+
+        assertEquals(Boolean.TRUE, new OperationService(client(), properties).execute(selected));
+        assertEquals("GET /api/domains/source%2Fdomain/pseudonyms?id=0123456789&idType=case_number", requestLog.get(0));
+        assertEquals("DELETE /api/domains/source%2Fdomain/pseudonyms?psn=012-000000009-2", requestLog.get(1));
+        assertEquals(0, body(1).size());
     }
 
     /** Verifies entity replacement dispatch with the mapped TrustDeck UUID. */
@@ -170,6 +215,10 @@ class OperationServiceHttpTest {
     void updatesEntityThroughClient() {
         properties.setOperation("UPDATE_ENTITY");
         assertNotNull(new OperationService(client(), properties).execute(message()));
+        assertEquals("PUT /api/projects/synthetic-project/entities/synthetic-type/11111111-1111-1111-1111-111111111111",
+                requestLog.get(0));
+        assertEquals("0123456789", body(0).at("/data/caseNumber").asText());
+        assertEquals(1, body(0).size());
     }
 
     /** Verifies combined creation reads associated pseudonyms before creating its target value. */
@@ -177,6 +226,13 @@ class OperationServiceHttpTest {
     void createsEntityAndPseudonymThroughClient() {
         properties.setOperation("CREATE_ENTITY_AND_PSEUDONYM");
         assertNotNull(new OperationService(client(), properties).execute(message(), "source/0/1"));
+        assertEquals("POST /api/projects/synthetic-project/entities/synthetic-type", requestLog.get(0));
+        assertEquals("GET /api/projects/synthetic-project/entities/synthetic-type/11111111-1111-1111-1111-111111111111/pseudonyms",
+                requestLog.get(1));
+        assertEquals("POST /api/domains/source%2Fdomain/pseudonyms?omitPrefix=false", requestLog.get(2));
+        assertEquals("11111111-1111-1111-1111-111111111111", body(2).at("/identifierItem/identifier").asText());
+        assertEquals("TrustDeckID", body(2).at("/identifierItem/idType").asText());
+        assertTrue(body(2).get("validTo") == null);
     }
 
     /** Verifies explicit combined replay starts at pseudonym creation using the preserved entity UUID. */
@@ -193,7 +249,10 @@ class OperationServiceHttpTest {
                 new OperationService(client(), properties), properties);
         assertNotNull(replay.replay(envelope, "{}".getBytes()));
 
-        assertEquals(1, requestLog.stream().filter(path -> path.startsWith("POST") && path.contains("/pseudonyms")).count());
+        assertEquals("GET /api/projects/synthetic-project/entities/synthetic-type/11111111-1111-1111-1111-111111111111/pseudonyms",
+                requestLog.get(0));
+        assertEquals("POST /api/domains/source%2Fdomain/pseudonyms?omitPrefix=false", requestLog.get(1));
+        assertEquals("11111111-1111-1111-1111-111111111111", body(1).at("/identifierItem/identifier").asText());
         assertEquals(0, requestLog.stream().filter(path -> path.contains("/entities/") && path.startsWith("POST"))
                 .count());
     }
@@ -237,6 +296,23 @@ class OperationServiceHttpTest {
                 "old", "type", "old-psn", "new", "type", "new-psn", "source/domain", "target/domain");
     }
 
+    /** Creates a standard update with no replacement selector or value. */
+    private MappedMessage standardUpdateMessage() {
+        return new MappedMessage("source/domain", "0123456789", "case_number", "012-000000009-2", null, null, null,
+                "source-user", "synthetic-type", UUID.fromString("11111111-1111-1111-1111-111111111111"),
+                new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode().put("caseNumber", "0123456789"),
+                "old", "type", "old-psn", null, null, null, null, null);
+    }
+
+    /** Parses a captured JSON request body. */
+    private com.fasterxml.jackson.databind.JsonNode body(int index) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().readTree(requestBodies.get(index));
+        } catch (IOException exception) {
+            throw new AssertionError("Invalid captured request body", exception);
+        }
+    }
+
     /**
      * Returns controlled responses for the client endpoints.
      *
@@ -246,9 +322,14 @@ class OperationServiceHttpTest {
     private void respond(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
         requestBodies.add(new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
-        requestLog.add(exchange.getRequestMethod() + " " + exchange.getRequestURI().getRawPath());
+        String query = exchange.getRequestURI().getRawQuery();
+        requestLog.add(exchange.getRequestMethod() + " " + exchange.getRequestURI().getRawPath()
+                + (query == null ? "" : "?" + query));
         if (path.endsWith("/pseudonyms") && "GET".equals(exchange.getRequestMethod())) {
-            byte[] response = "[]".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            String responseBody = lookupResponse && path.startsWith("/api/domains/")
+                    ? "{\"identifierItem\":{\"identifier\":\"0123456789\",\"idType\":\"case_number\"},\"psn\":\"012-000000009-2\"}"
+                    : "[]";
+            byte[] response = responseBody.getBytes(java.nio.charset.StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, response.length);
             exchange.getResponseBody().write(response);
             exchange.close();
