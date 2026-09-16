@@ -7,6 +7,7 @@
 package org.trustdeck.connector.kafka.kafka;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -93,6 +94,7 @@ class ConnectorRestartIntegrationTest {
         var blocked = send("blocked");
         awaitMarkerCount(2);
         assertEquals(first.offset() + 1, committedOffset());
+        assertTrue(groupHasMember());
         context.close();
         context = null;
 
@@ -165,6 +167,13 @@ class ConnectorRestartIntegrationTest {
             var offset = admin.listConsumerGroupOffsets(GROUP).partitionsToOffsetAndMetadata()
                     .get(5, TimeUnit.SECONDS).get(new TopicPartition(TOPIC, 0));
             return offset == null ? 0 : offset.offset();
+        }
+    }
+
+    /** Confirms the consumer remains a group member while processing is paused. */
+    private boolean groupHasMember() throws Exception {
+        try (AdminClient admin = AdminClient.create(Map.of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
+            return !admin.describeConsumerGroups(List.of(GROUP)).all().get(5, TimeUnit.SECONDS).get(GROUP).members().isEmpty();
         }
     }
 

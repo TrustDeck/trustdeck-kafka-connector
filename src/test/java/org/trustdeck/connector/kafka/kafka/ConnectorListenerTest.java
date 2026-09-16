@@ -21,6 +21,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.kafka.support.Acknowledgment;
+import org.trustdeck.client.exception.RecordLinkageConflictException;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
 import org.trustdeck.connector.kafka.mapping.JsonMessageMapper;
 import org.trustdeck.connector.kafka.mapping.MappedMessage;
@@ -130,6 +131,30 @@ class ConnectorListenerTest {
                 org.mockito.ArgumentMatchers.eq(0), org.mockito.ArgumentMatchers.any(IllegalArgumentException.class));
         verify(recovery, never()).publishUnknown(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    /** Routes a TrustDeck linkage conflict to the review topic and acknowledges it. */
+    @Test
+    void publishesLinkageConflictToReview() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        RecoveryPublisher recovery = mock(RecoveryPublisher.class);
+        ConnectorProperties properties = properties("CREATE_ENTITY");
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        OutageCoordinator outage = mock(OutageCoordinator.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        ConsumerRecord<byte[], byte[]> source = record(0, new byte[] {1});
+        MappedMessage mapped = mapped();
+        when(mapper.map(source.value())).thenReturn(mapped);
+        when(operations.execute(eq(mapped), org.mockito.ArgumentMatchers.any()))
+                .thenThrow(mock(RecordLinkageConflictException.class));
+
+        new ConnectorListener(mapper, operations, recovery, properties, batches, outage)
+                .onMessage(List.of(source), acknowledgment);
+
+        verify(recovery).publishReview(eq(source), eq(mapped), eq(1),
+                org.mockito.ArgumentMatchers.any(RecordLinkageConflictException.class));
+        verify(acknowledgment).acknowledge(0);
     }
 
     private ConnectorProperties properties(String operation) {

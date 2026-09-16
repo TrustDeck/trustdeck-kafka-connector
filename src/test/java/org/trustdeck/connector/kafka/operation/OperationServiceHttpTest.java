@@ -36,6 +36,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.trustdeck.client.TrustDeckClient;
+import org.trustdeck.client.exception.TrustDeckResponseException;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
 import org.trustdeck.connector.kafka.kafka.ManualReplayService;
 import org.trustdeck.connector.kafka.kafka.RecoveryEnvelope;
@@ -57,6 +58,9 @@ class OperationServiceHttpTest {
     /** Captured request bodies. */
     private final List<String> requestBodies = new CopyOnWriteArrayList<>();
 
+    /** Status returned by the synthetic endpoint for the next operation. */
+    private int responseStatus;
+
     /**
      * Starts the controlled server.
      *
@@ -72,6 +76,7 @@ class OperationServiceHttpTest {
         properties.getTrustdeck().setServiceUrl("http://localhost:" + server.getAddress().getPort());
         properties.getTrustdeck().setProject("synthetic-project");
         properties.getTrustdeck().setEntityType("synthetic-type");
+        responseStatus = 0;
     }
 
     /** Stops the controlled server. */
@@ -113,6 +118,16 @@ class OperationServiceHttpTest {
         com.fasterxml.jackson.databind.JsonNode body = new com.fasterxml.jackson.databind.ObjectMapper()
                 .readTree(requestBodies.get(0));
         assertEquals("1d", body.get("validityTime").asText());
+    }
+
+    /** Preserves an ordinary HTTP conflict as the client response exception. */
+    @Test
+    void preservesOrdinaryConflictResponse() {
+        responseStatus = 409;
+        TrustDeckResponseException exception = assertThrows(TrustDeckResponseException.class,
+                () -> new OperationService(client(), properties).execute(message()));
+
+        assertEquals(409, exception.getStatusCode());
     }
 
     /** Verifies entity creation uses the arbitrary mapped JSON object. */
@@ -239,7 +254,7 @@ class OperationServiceHttpTest {
             exchange.close();
             return;
         }
-        int status = "DELETE".equals(exchange.getRequestMethod()) ? 204
+        int status = responseStatus != 0 ? responseStatus : "DELETE".equals(exchange.getRequestMethod()) ? 204
                 : "PUT".equals(exchange.getRequestMethod()) ? 200 : 201;
         byte[] response = status == 204 ? new byte[0]
                 : "{\"identifierItem\":{\"identifier\":\"0123456789\",\"idType\":\"case_number\"},\"psn\":\"012-000000009-2\",\"trustdeckID\":\"11111111-1111-1111-1111-111111111111\",\"data\":{}}".getBytes(java.nio.charset.StandardCharsets.UTF_8);

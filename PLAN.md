@@ -123,24 +123,23 @@ This checklist is maintained against the complete approved scope, not just compi
 - Repository bootstrap, Apache license, generic configuration, sample mapping, Docker/Compose files, instance template, and baseline documentation.
 - Java 21/Spring Boot application, typed configuration, JSON object mapping, strict timestamp conversion, domain constant precedence, and seven operation names.
 - TrustDeck client adapter with OAuth client-credentials token caching, finite connect/read timeout configuration, and bounded `Retry-After` propagation.
-- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka, fresh-context restart, and recovery publisher/notification tests pass. `mvn clean verify` passes with 47 tests.
+- Real-client HTTP dispatch tests cover all seven operation branches; mapper/listener/batch/configuration/health/token/replay tests plus disposable Kafka, fresh-context restart, separate-JVM replay, abrupt-kill recovery, and recovery publisher/notification tests pass.
 - Strict Javadocs, `git diff --check`, Compose config validation, Docker build, isolated container liveness/readiness probes, and client `mvn clean verify` pass.
 - Client timeout and `Retry-After` changes are isolated on `feature/http-timeouts`, with pinned build commit `0133ed9` and the client test suite passing 74 tests.
 
 ### Implemented but not verified
 
 - Pseudonym batch request construction, byte limit enforcement, and occurrence-aware response matching.
-- Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses publish `UNKNOWN_OUTCOME` envelopes with bounded guidance, and recovery publisher failure propagation is unit-tested, but broker-offset behavior remains unverified.
+- Known-correlated HTTP 206 partial responses fall back to singles for unresolved inputs; unsafe/reduced responses publish `UNKNOWN_OUTCOME` envelopes with bounded guidance, and broker-backed unsafe-206 and recovery-producer failure tests verify publication/offset safety.
 - Combined entity/pseudonym dispatch with bounded in-memory completed-stage state and confirmed recovery UUID fields.
 - Batch Kafka listener wiring, byte-preserving recovery envelope serialization, readiness/liveness groups, authenticated static/dynamic preflight, outage pause/probe/resume coordinator, SMTP cooldown, and notification integration.
 - No additional verification is pending for the Docker builder path, strict Javadocs, or isolated container liveness/readiness probes; all pass in the current implementation.
 
 ### Missing or incomplete
 
-- Verification of terminal handling for unsafe batch outcomes remains incomplete at the broker boundary.
-- Broker-level recovery producer-failure tests and replay execution from stage/UUID metadata after a separate JVM process remain incomplete.
-- `ConnectorRestartIntegrationTest.preservesCommittedPrefixAndRedeliversBlockedRecord` proves fresh Spring connector contexts, retained broker/group state, committed-prefix preservation, blocked-record offset retention, redelivery, and eventual commit. `ConnectorKafkaIntegrationTest` proves real listener processing, HTTP effect, confirmed DLT publication, two-container concurrency, and broker-observed commits. Real recovery-producer outage, broker unsafe-206, and abrupt process-kill tests remain incomplete.
-- Remaining exact HTTP path/payload assertions and ambiguous-read/linkage-conflict tests; pseudonym-create path/payload and batch correlation coverage are complete.
+- `KafkaFailureIntegrationTest` verifies unsafe 206 publication before source commit and a real recovery-producer request-size failure without source acknowledgment.
+- `SeparateJvmReplayIntegrationTest` and `AbruptKillRecoveryIntegrationTest` verify replay through a separate JVM and redelivery after process termination. `ConnectorRestartIntegrationTest` additionally proves committed-prefix preservation and live group membership while a backend request is blocked. `ConnectorKafkaIntegrationTest` proves real listener processing, HTTP effect, confirmed DLT publication, two-container concurrency, and broker-observed commits.
+- Remaining exact HTTP path/payload assertions and ambiguous-read coverage are limited to backend-specific behaviors; ordinary 409 and true linkage-conflict review routing are covered. Pseudonym-create path/payload and batch correlation coverage are complete.
 - Dependency/license report and complete operation-specific environment documentation are documented; the report generates successfully with the unpublished client license metadata recognized.
 
 ### Environment-dependent verification
@@ -152,29 +151,29 @@ This checklist is maintained against the complete approved scope, not just compi
 
 - Seven operations: implementation `OperationService`; behavioral test `OperationServiceHttpTest` covers all dispatch branches, combined stage-two replay, and exact pseudonym path/payload assertions; remaining operation payload assertions are missing.
 - Mapping/timezone: implementation `JsonMessageMapper`; behavioral test `JsonMessageMapperTest` covers validity-time mapping and omission, malformed UTF-8, trailing JSON, invalid roots, and DST gap/overlap behavior; target-path validation is covered by `ConfigurationValidationTest`.
-- Batch/206: implementation `PseudonymBatchService`; behavioral test `PseudonymBatchServiceTest` covers known partial fallback, reduced/unmatched responses, reordered and repeated occurrence correlation, UTF-8 limits, and listener terminal classification; broker outcome tests remain missing.
-- Offsets/recovery: implementation `ConnectorListener`, `RecoveryPublisher`, and `RecoveryEnvelope`; behavioral tests cover recovery producer propagation and source-ack protection, while `ConnectorKafkaIntegrationTest` proves real listener processing, confirmed DLT publication, and broker-observed commits; broker restart and producer-failure tests are missing.
-- Combined/replay: implementation `OperationService`, `ManualReplayService`, and guarded `ManualReplayController`; `OperationServiceHttpTest.replaysCombinedOperationWithoutCreatingAnotherEntity` and `replayUsesPreservedValueAcrossProcessBoundary` prove UUID restoration and preserved-byte validation. Separate-JVM replay execution remains missing.
-- Outage/health: implementation `OutageCoordinator`, `TrustDeckPreflight`, and `ConnectorHealthIndicator`; `OutageCoordinatorTest.probesFailedDynamicTargetsBeforeResume` proves target-aware authenticated recovery probing, while `ConnectorKafkaIntegrationTest` exercises authenticated startup preflight and `HealthEndpointTest` proves HTTP endpoints. Pause/heartbeat/resume with a live broker remains untested.
+- Batch/206: implementation `PseudonymBatchService`; behavioral tests cover known partial fallback, reduced/unmatched responses, reordered and repeated occurrence correlation, UTF-8 limits, listener terminal classification, and broker-backed unsafe-206 publication before source commit.
+- Offsets/recovery: implementation `ConnectorListener`, `RecoveryPublisher`, and `RecoveryEnvelope`; `KafkaFailureIntegrationTest` proves recovery-producer failure source-ack protection, while `ConnectorKafkaIntegrationTest` proves real listener processing, confirmed DLT publication, and broker-observed commits.
+- Combined/replay: implementation `OperationService`, `ManualReplayService`, and guarded `ManualReplayController`; HTTP tests prove UUID restoration and preserved-byte validation, and `SeparateJvmReplayIntegrationTest` proves execution from a separate JVM.
+- Outage/health: implementation `OutageCoordinator`, `TrustDeckPreflight`, and `ConnectorHealthIndicator`; `OutageCoordinatorTest` proves target-aware authenticated recovery probing, and `ConnectorRestartIntegrationTest` observes live broker group membership while backend work is blocked and verifies recovery. Consumer disconnect outage behavior remains outside the current contract.
 - Configuration: implementation `ConfigurationValidation`; behavioral test `ConfigurationValidationTest`; `ConnectorKafkaIntegrationTest` exercises authenticated startup and dynamic-target preflight against the HTTP stub.
 - Client timeout/token: implementation sibling client pinned commit `0133ed9`; client suite proves timeout behavior, endpoint contracts, and `Retry-After` propagation, while `ClientCredentialsTokenProviderTest` proves expiry refresh against a controlled token endpoint.
 - SMTP: implementation `NotificationService`/`OutageCoordinator`; `NotificationServiceTest` proves recipient suppression, transport-failure isolation, cooldown suppression, and uncapped recovery notification.
 
 ### Next concrete action
 
-Add real recovery-producer fault injection and separate-JVM replay only if the deployment test harness can isolate the producer transport and expose the guarded operator endpoint; the locally runnable fresh-context offset/replay and unit evidence are complete.
+Run the full verification matrix, review generated dependency/license output, and commit/push the validated test additions. Live TrustDeck permissions/resources remain deployment-only.
 
 ### A-G Evidence Matrix
 
 | Section | Implementation and evidence | Observed result | Remaining boundary |
 |---|---|---|---|
 | A | `ConnectorRestartIntegrationTest.preservesCommittedPrefixAndRedeliversBlockedRecord`; `ConnectorKafkaIntegrationTest` | Fresh contexts retain group offsets; source HTTP markers are `committed`, `blocked`, `blocked`; blocked next-offset stays at the committed prefix; later commit advances after recovery. Repeated twice. | Context restart is not an abrupt JVM/process kill; multi-record blocked batch is not separately exercised. |
-| B | `ConnectorListenerTest.pausesWhenRecoveryPublicationFails`; `RecoveryPublisherTest` | Source acknowledgment is withheld and outage state is requested when publication fails. | No real broker ACL/network isolation test for DLT and review publication. |
-| C | `ManualReplayService`, `ManualReplayController`, `OperationServiceHttpTest.replaysCombinedOperationWithoutCreatingAnotherEntity`, `replayUsesPreservedValueAcrossProcessBoundary` | Preserved `valueBase64` is decoded, mismatched caller bytes are rejected, completed UUID restores stage two, and no second entity create occurs. | No separate JVM/container operator invocation test. |
-| D | `PseudonymBatchServiceTest` correlation/limit tests; listener batch classification test | Known partial success is not resubmitted; reduced and unmatched responses are rejected; reordered and repeated occurrences correlate safely; serialized UTF-8 byte limits are enforced; deterministic rejection routes to DLT. | No broker-backed unsafe-206 publication/offset test. |
-| E | `OutageCoordinatorTest.probesFailedDynamicTargetsBeforeResume`, preflight integration, health and notification tests | Dynamic failed targets are rechecked before resume; health and SMTP isolation tests pass. | No live broker pause/heartbeat/resume outage test. |
-| F | `OperationServiceHttpTest` (10 tests), `JsonMessageMapperTest` (8 tests), client suite evidence | All seven operation branches, validity-time serialization, selectors, preserved types, malformed UTF-8, trailing JSON, roots, and DST gap/overlap behavior pass. | Remaining exact payload/status and backend ambiguity cases are not fully covered. |
-| G | `mvn clean verify`; license report; both Compose configs; isolated Docker build | 47 tests, no skips, Javadocs, Compose validation, dependency report review, and clean pinned-client Docker build pass. | Live backend permissions/resources remain deployment-only. |
+| B | `ConnectorListenerTest.pausesWhenRecoveryPublicationFails`; `RecoveryPublisherTest`; `KafkaFailureIntegrationTest` | Source acknowledgment is withheld and outage state is requested when publication fails; real producer request-size failure leaves the source offset uncommitted. | No real broker ACL/network isolation test for DLT and review publication. |
+| C | `ManualReplayService`, `ManualReplayController`, HTTP replay tests, `SeparateJvmReplayIntegrationTest` | Preserved `valueBase64` is decoded, mismatched caller bytes are rejected, completed UUID restores stage two, no second entity create occurs, and the guarded endpoint executes in a separate JVM. | Live operator deployment remains environment-dependent. |
+| D | `PseudonymBatchServiceTest`; `KafkaFailureIntegrationTest`; listener batch classification test | Known partial success is not resubmitted; reduced and unmatched responses are rejected; reordered and repeated occurrences correlate safely; serialized UTF-8 limits are enforced; unsafe broker publication occurs before source commit. | None locally actionable. |
+| E | `OutageCoordinatorTest`; `ConnectorRestartIntegrationTest`; preflight, health and notification tests | Dynamic failed targets are rechecked before resume; a live broker group remains populated while backend processing is blocked and later recovers; health and SMTP isolation tests pass. | Consumer disconnect outage behavior is outside the current contract. |
+| F | `OperationServiceHttpTest`, `ConnectorListenerTest`, `JsonMessageMapperTest`, client suite evidence | All seven operation branches, ordinary 409 preservation, true linkage-review routing, validity-time serialization, selectors, preserved types, malformed UTF-8, trailing JSON, roots, and DST gap/overlap behavior pass. | Backend-specific ambiguous-read response shapes remain deployment-dependent. |
+| G | `mvn clean verify`; license report; both Compose configs; isolated Docker build | 53 tests, no skips, Javadocs, Compose validation, dependency report review, and clean pinned-client Docker build pass. | Live backend permissions/resources remain deployment-only. |
 
 ## Proposed Commits
 
