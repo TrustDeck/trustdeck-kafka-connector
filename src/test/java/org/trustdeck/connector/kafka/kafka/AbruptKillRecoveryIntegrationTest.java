@@ -26,6 +26,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -37,10 +38,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 import org.trustdeck.connector.kafka.TrustDeckKafkaConnectorApplication;
 
 /** Verifies redelivery after the connector JVM is killed before an HTTP response. */
@@ -50,9 +50,8 @@ class AbruptKillRecoveryIntegrationTest {
     private static final String SOURCE = "abrupt-kill-" + UUID.randomUUID();
     private static final String GROUP = SOURCE + "-group";
 
-    @Container
-    private static final KafkaContainer KAFKA = new KafkaContainer(
-            DockerImageName.parse("confluentinc/cp-kafka:7.8.0"));
+	@Container
+    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
 
     private HttpServer trustDeck;
     private final List<String> markers = new CopyOnWriteArrayList<>();
@@ -170,7 +169,7 @@ class AbruptKillRecoveryIntegrationTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
         while (System.nanoTime() < deadline) {
             try (AdminClient admin = AdminClient.create(Map.of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
-                var offset = admin.listConsumerGroupOffsets(GROUP).partitionsToOffsetAndMetadata().get(5, TimeUnit.SECONDS)
+                OffsetAndMetadata offset = admin.listConsumerGroupOffsets(GROUP).partitionsToOffsetAndMetadata().get(5, TimeUnit.SECONDS)
                         .get(new TopicPartition(SOURCE, 0));
                 if (offset != null && offset.offset() >= expected) {
                     return;

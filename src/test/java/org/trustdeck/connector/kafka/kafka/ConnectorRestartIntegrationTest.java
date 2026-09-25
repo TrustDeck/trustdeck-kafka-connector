@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -24,10 +23,11 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.AfterEach;
@@ -36,10 +36,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 import org.trustdeck.connector.kafka.TrustDeckKafkaConnectorApplication;
 
 /** Verifies source offsets and redelivery across fresh connector application contexts. */
@@ -51,8 +50,7 @@ class ConnectorRestartIntegrationTest {
     private static final String GROUP = "connector-restart-group-" + UUID.randomUUID();
 
     @Container
-    private static final KafkaContainer KAFKA = new KafkaContainer(
-            DockerImageName.parse("confluentinc/cp-kafka:7.8.0"));
+    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
 
     private HttpServer trustDeck;
     private final List<String> markers = new CopyOnWriteArrayList<>();
@@ -84,14 +82,14 @@ class ConnectorRestartIntegrationTest {
     @Test
     void preservesCommittedPrefixAndRedeliversBlockedRecord() throws Exception {
         context = startConnector();
-        var first = send("committed");
+        RecordMetadata first = send("committed");
         awaitCommitted(first.offset() + 1);
         context.close();
         context = null;
         awaitMarkerCount(1);
 
         context = startConnector();
-        var blocked = send("blocked");
+        RecordMetadata blocked = send("blocked");
         awaitMarkerCount(2);
         assertEquals(first.offset() + 1, committedOffset());
         assertTrue(groupHasMember());
@@ -138,7 +136,7 @@ class ConnectorRestartIntegrationTest {
     }
 
     /** Sends one distinguishable record to the only source partition. */
-    private org.apache.kafka.clients.producer.RecordMetadata send(String marker) throws Exception {
+    private RecordMetadata send(String marker) throws Exception {
         Map<String, Object> settings = Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
@@ -164,7 +162,7 @@ class ConnectorRestartIntegrationTest {
     /** Reads the connector group's broker-observed offset. */
     private long committedOffset() throws Exception {
         try (AdminClient admin = AdminClient.create(Map.of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
-            var offset = admin.listConsumerGroupOffsets(GROUP).partitionsToOffsetAndMetadata()
+            OffsetAndMetadata offset = admin.listConsumerGroupOffsets(GROUP).partitionsToOffsetAndMetadata()
                     .get(5, TimeUnit.SECONDS).get(new TopicPartition(TOPIC, 0));
             return offset == null ? 0 : offset.offset();
         }

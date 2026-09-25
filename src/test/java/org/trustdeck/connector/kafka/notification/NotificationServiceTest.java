@@ -10,8 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -25,33 +27,36 @@ class NotificationServiceTest {
     /** Ensures notifications are suppressed when no recipients are configured. */
     @Test
     void suppressesNotificationWithoutRecipients() {
-        ObjectProvider<JavaMailSender> provider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked")
+		ObjectProvider<JavaMailSender> provider = mock(ObjectProvider.class);
         JavaMailSender sender = mock(JavaMailSender.class);
         when(provider.getIfAvailable()).thenReturn(sender);
 
         new NotificationService(provider, "", "from@example.test", "[Test]").send("Subject", "Body");
 
-        verify(sender, never()).send(org.mockito.ArgumentMatchers.any(SimpleMailMessage.class));
+        verify(sender, never()).send(any(SimpleMailMessage.class));
     }
 
     /** Ensures a mail transport failure does not escape into Kafka processing. */
     @Test
     void swallowsNotificationTransportFailure() {
-        ObjectProvider<JavaMailSender> provider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked")
+		ObjectProvider<JavaMailSender> provider = mock(ObjectProvider.class);
         JavaMailSender sender = mock(JavaMailSender.class);
         when(provider.getIfAvailable()).thenReturn(sender);
         doThrow(new IllegalStateException("SMTP unavailable")).when(sender)
-                .send(org.mockito.ArgumentMatchers.any(SimpleMailMessage.class));
+                .send(any(SimpleMailMessage.class));
 
         assertDoesNotThrow(() -> new NotificationService(provider, "to@example.test", "from@example.test", "[Test]")
                 .send("Subject", "Body"));
-        verify(sender).send(org.mockito.ArgumentMatchers.any(SimpleMailMessage.class));
+        verify(sender).send(any(SimpleMailMessage.class));
     }
 
     /** Ensures repeated outage notices are cooled down while recovery is always sent. */
     @Test
     void coolsDownOutageButNotRecoveryNotification() {
-        ObjectProvider<JavaMailSender> provider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked")
+		ObjectProvider<JavaMailSender> provider = mock(ObjectProvider.class);
         JavaMailSender sender = mock(JavaMailSender.class);
         when(provider.getIfAvailable()).thenReturn(sender);
         NotificationService notifications = new NotificationService(provider, "to@example.test", "from@example.test",
@@ -61,6 +66,6 @@ class NotificationServiceTest {
         notifications.send("TrustDeck outage", "duplicate");
         notifications.send("TrustDeck recovered", "recovered");
 
-        verify(sender, org.mockito.Mockito.times(2)).send(org.mockito.ArgumentMatchers.any(SimpleMailMessage.class));
+        verify(sender, times(2)).send(any(SimpleMailMessage.class));
     }
 }

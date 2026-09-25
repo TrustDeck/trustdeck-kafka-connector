@@ -26,9 +26,13 @@ import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -38,10 +42,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 import org.trustdeck.connector.kafka.TrustDeckKafkaConnectorApplication;
 
 /** Verifies terminal unsafe batch handling at the broker boundary. */
@@ -49,8 +52,7 @@ import org.trustdeck.connector.kafka.TrustDeckKafkaConnectorApplication;
 class KafkaFailureIntegrationTest {
 
     @Container
-    private static final KafkaContainer KAFKA = new KafkaContainer(
-            DockerImageName.parse("confluentinc/cp-kafka:7.8.0"));
+    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
 
     private String source;
     private String dlt;
@@ -87,7 +89,7 @@ class KafkaFailureIntegrationTest {
     @Test
     void unsafePartialBatchPublishesUnknownOutcomeBeforeCommit() throws Exception {
         context = startConnector();
-        var first = send("{\"identifier\":\"one\",\"idType\":\"type\",\"psn\":\"p1\"}");
+        RecordMetadata first = send("{\"identifier\":\"one\",\"idType\":\"type\",\"psn\":\"p1\"}");
         send("{\"identifier\":\"two\",\"idType\":\"type\",\"psn\":\"p2\"}");
 
         JsonNode envelope = new ObjectMapper().readTree(pollDlt());
@@ -101,7 +103,7 @@ class KafkaFailureIntegrationTest {
     void recoveryProducerFailureLeavesSourceOffsetUncommitted() throws Exception {
         producerRequestSize = 1_000;
         context = startConnector();
-        var record = send("{\"identifier\":\"one\",\"idType\":\"type\",\"psn\":\""
+        RecordMetadata record = send("{\"identifier\":\"one\",\"idType\":\"type\",\"psn\":\""
                 + "x".repeat(4_000) + "\"}");
 
         Thread.sleep(2_000);
@@ -144,7 +146,7 @@ class KafkaFailureIntegrationTest {
                         .toArray(String[]::new));
     }
 
-    private org.apache.kafka.clients.producer.RecordMetadata send(String value) throws Exception {
+    private RecordMetadata send(String value) throws Exception {
         Map<String, Object> settings = Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
@@ -160,11 +162,11 @@ class KafkaFailureIntegrationTest {
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
                 ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        try (var consumer = new org.apache.kafka.clients.consumer.KafkaConsumer<String, String>(settings)) {
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(settings)) {
             consumer.subscribe(List.of(dlt));
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
             while (System.nanoTime() < deadline) {
-                var records = consumer.poll(Duration.ofMillis(250));
+                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(250));
                 if (!records.isEmpty()) {
                     return records.iterator().next().value();
                 }
@@ -183,7 +185,7 @@ class KafkaFailureIntegrationTest {
 
     private long committedOffset(int partition) throws Exception {
         try (AdminClient admin = AdminClient.create(Map.of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
-            var offset = admin.listConsumerGroupOffsets(group).partitionsToOffsetAndMetadata().get(5, TimeUnit.SECONDS)
+            OffsetAndMetadata offset = admin.listConsumerGroupOffsets(group).partitionsToOffsetAndMetadata().get(5, TimeUnit.SECONDS)
                     .get(new TopicPartition(source, partition));
             return offset == null ? -1 : offset.offset();
         }

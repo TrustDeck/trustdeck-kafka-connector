@@ -12,24 +12,27 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Map;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.serialization.ByteArrayDeserializer;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -37,10 +40,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 import org.trustdeck.connector.kafka.TrustDeckKafkaConnectorApplication;
 
 /** Exercises the configured Spring Kafka listener and recovery publisher against disposable services. */
@@ -50,9 +52,9 @@ class ConnectorKafkaIntegrationTest {
 
     private static final String SOURCE = "connector-source-" + UUID.randomUUID();
     private static final String DLT = SOURCE + ".DLT";
-    @Container
-    private static final KafkaContainer KAFKA = new KafkaContainer(
-            DockerImageName.parse("confluentinc/cp-kafka:7.8.0"));
+    @SuppressWarnings("resource")
+	@Container
+    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
     private static HttpServer trustDeck;
 
     static {
@@ -69,7 +71,7 @@ class ConnectorKafkaIntegrationTest {
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         try (AdminClient admin = AdminClient.create(Map.of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
-            admin.createTopics(java.util.List.of(new NewTopic(SOURCE, 2, (short) 1),
+            admin.createTopics(List.of(new NewTopic(SOURCE, 2, (short) 1),
                     new NewTopic(DLT, 1, (short) 1), new NewTopic(SOURCE + ".REVIEW", 1, (short) 1)))
                     .all().get(15, TimeUnit.SECONDS);
         } catch (Exception exception) {
@@ -104,7 +106,7 @@ class ConnectorKafkaIntegrationTest {
     void realListenerProcessesRecordAndCommitsIt() throws Exception {
         byte[] value = "{}".getBytes(StandardCharsets.UTF_8);
         try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(byteProducerSettings())) {
-            var metadata = producer.send(new ProducerRecord<>(SOURCE, new byte[] {1}, value))
+            RecordMetadata metadata = producer.send(new ProducerRecord<>(SOURCE, new byte[] {1}, value))
                     .get(15, TimeUnit.SECONDS);
             awaitCommitted(metadata.topic(), metadata.partition(), metadata.offset() + 1);
         }
@@ -118,7 +120,7 @@ class ConnectorKafkaIntegrationTest {
     @Test
     void realListenerPublishesDltBeforeCommittingInvalidRecord() throws Exception {
         byte[] invalid = "{invalid".getBytes(StandardCharsets.UTF_8);
-        var metadata = send(new ProducerRecord<>(SOURCE, new byte[] {2}, invalid));
+        RecordMetadata metadata = send(new ProducerRecord<>(SOURCE, new byte[] {2}, invalid));
         String envelope = pollRecovery();
         assertNotNull(envelope);
         assertEquals(true, envelope.contains("\"status\":\"FAILED_DLT\""));
@@ -132,7 +134,7 @@ class ConnectorKafkaIntegrationTest {
     }
 
     private static int requestCount;
-    private static final List<String> requestPaths = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private static final List<String> requestPaths = new CopyOnWriteArrayList<>();
 
     private static Map<String, Object> byteProducerSettings() {
         return Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
@@ -140,7 +142,7 @@ class ConnectorKafkaIntegrationTest {
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
     }
 
-    private static org.apache.kafka.clients.producer.RecordMetadata send(ProducerRecord<byte[], byte[]> record)
+    private static RecordMetadata send(ProducerRecord<byte[], byte[]> record)
             throws Exception {
         try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(byteProducerSettings())) {
             return producer.send(record).get(15, TimeUnit.SECONDS);
@@ -157,7 +159,7 @@ class ConnectorKafkaIntegrationTest {
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(settings)) {
             consumer.subscribe(List.of(DLT));
             while (System.nanoTime() < deadline) {
-                var records = consumer.poll(java.time.Duration.ofMillis(250));
+                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(250));
                 if (!records.isEmpty()) {
                     return records.iterator().next().value();
                 }
@@ -179,8 +181,8 @@ class ConnectorKafkaIntegrationTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
         TopicPartition source = new TopicPartition(topic, partition);
         while (System.nanoTime() < deadline) {
-            try (var admin = AdminClient.create(Map.of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
-                var committed = admin.listConsumerGroupOffsets("connector-integration-group")
+            try (AdminClient admin = AdminClient.create(Map.of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
+                OffsetAndMetadata committed = admin.listConsumerGroupOffsets("connector-integration-group")
                         .partitionsToOffsetAndMetadata().get(5, TimeUnit.SECONDS).get(source);
                 if (committed != null && committed.offset() >= expectedOffset) {
                     return;

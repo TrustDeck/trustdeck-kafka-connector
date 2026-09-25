@@ -15,6 +15,8 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.listener.MessageListenerContainer;
+import org.trustdeck.connector.kafka.health.OutageCoordinator;
+import org.trustdeck.connector.kafka.health.OutageState;
 import org.trustdeck.connector.kafka.notification.NotificationService;
 import org.trustdeck.connector.kafka.trustdeck.TrustDeckPreflight;
 

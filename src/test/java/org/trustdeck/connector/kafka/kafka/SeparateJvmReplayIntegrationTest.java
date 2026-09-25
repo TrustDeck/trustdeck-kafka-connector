@@ -33,10 +33,10 @@ import org.apache.kafka.clients.admin.NewTopic;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
+import org.trustdeck.connector.kafka.recovery.RecoveryEnvelope;
 
 /** Verifies that a replay envelope can be executed by a separate connector JVM. */
 @Testcontainers
@@ -48,8 +48,7 @@ class SeparateJvmReplayIntegrationTest {
     private static final String UUID_VALUE = "11111111-1111-1111-1111-111111111111";
 
     @Container
-    private static final KafkaContainer KAFKA = new KafkaContainer(
-            DockerImageName.parse("confluentinc/cp-kafka:7.8.0"));
+    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
 
     private HttpServer trustDeck;
     private final List<String> paths = new CopyOnWriteArrayList<>();

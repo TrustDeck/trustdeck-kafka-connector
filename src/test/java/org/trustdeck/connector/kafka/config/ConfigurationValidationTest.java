@@ -9,6 +9,8 @@ package org.trustdeck.connector.kafka.config;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 /** Verifies operation-aware startup validation without contacting external services. */
@@ -18,6 +20,7 @@ class ConfigurationValidationTest {
     @Test
     void pseudonymConstantDomainDoesNotNeedEntitySettings() {
         ConnectorProperties properties = base("CREATE_PSEUDONYM");
+        properties.getTrustdeck().setProject("project");
         properties.getMapping().getCommon().setDomainConstant("synthetic-domain");
         properties.getMapping().getCommon().setIdentifierPath("/identifier");
         properties.getMapping().getCommon().setIdTypePath("/idType");
@@ -61,7 +64,7 @@ class ConfigurationValidationTest {
         ConnectorProperties.FieldMapping field = new ConnectorProperties.FieldMapping();
         field.setSourcePath("/source");
         field.setTargetPath("/data/");
-        properties.getMapping().getCommon().setEntityFields(java.util.List.of(field));
+        properties.getMapping().getCommon().setEntityFields(List.of(field));
 
         assertThrows(IllegalArgumentException.class, () -> new ConfigurationValidation(properties));
     }

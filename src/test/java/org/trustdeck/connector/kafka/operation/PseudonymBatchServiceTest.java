@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -48,6 +49,7 @@ class PseudonymBatchServiceTest {
     @Test
     void fallsBackToSinglesForKnownPartialResponse() {
         ConnectorProperties properties = new ConnectorProperties();
+        properties.getTrustdeck().setProject("synthetic-project");
         properties.setBatchSize(10);
         properties.setBatchBytes(100_000);
         TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
@@ -65,6 +67,7 @@ class PseudonymBatchServiceTest {
     @Test
     void forwardsOptionalValidityTimeInBatch() {
         ConnectorProperties properties = new ConnectorProperties();
+        properties.getTrustdeck().setProject("synthetic-project");
         properties.setBatchSize(10);
         properties.setBatchBytes(100_000);
         TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
@@ -80,6 +83,7 @@ class PseudonymBatchServiceTest {
     void rejectsReducedPartialResponse() {
         responseMode = "reduced";
         ConnectorProperties properties = new ConnectorProperties();
+        properties.getTrustdeck().setProject("synthetic-project");
         properties.setBatchSize(10);
         properties.setBatchBytes(100_000);
         TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
@@ -94,6 +98,7 @@ class PseudonymBatchServiceTest {
     void correlatesReorderedCompleteResponse() {
         responseMode = "reordered";
         ConnectorProperties properties = new ConnectorProperties();
+        properties.getTrustdeck().setProject("synthetic-project");
         properties.setBatchSize(10);
         properties.setBatchBytes(100_000);
         TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
@@ -111,6 +116,7 @@ class PseudonymBatchServiceTest {
     void correlatesRepeatedOccurrences() {
         responseMode = "duplicate";
         ConnectorProperties properties = new ConnectorProperties();
+        properties.getTrustdeck().setProject("synthetic-project");
         properties.setBatchSize(10);
         properties.setBatchBytes(100_000);
         TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
@@ -128,6 +134,7 @@ class PseudonymBatchServiceTest {
     void rejectsUnmatchedCompleteResponse() {
         responseMode = "unmatched";
         ConnectorProperties properties = new ConnectorProperties();
+        properties.getTrustdeck().setProject("synthetic-project");
         properties.setBatchSize(10);
         properties.setBatchBytes(100_000);
         TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
@@ -141,6 +148,7 @@ class PseudonymBatchServiceTest {
     @Test
     void rejectsUtf8BatchAboveByteLimit() {
         ConnectorProperties properties = new ConnectorProperties();
+        properties.getTrustdeck().setProject("synthetic-project");
         properties.setBatchSize(10);
         properties.setBatchBytes(20);
         TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
@@ -162,7 +170,7 @@ class PseudonymBatchServiceTest {
 
     private void respond(HttpExchange exchange) throws IOException {
         boolean batch = exchange.getRequestURI().getPath().endsWith("/batch");
-        batchBody = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        batchBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         if (!batch) {
             singleCreates++;
         }
@@ -178,7 +186,7 @@ class PseudonymBatchServiceTest {
         if (!batch) {
             response = "{\"identifierItem\":{\"identifier\":\"two\",\"idType\":\"type\"},\"psn\":\"p2\"}";
         }
-        byte[] body = response.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] body = response.getBytes(StandardCharsets.UTF_8);
         exchange.sendResponseHeaders(batch ? 206 : 201, body.length);
         exchange.getResponseBody().write(body);
         exchange.close();

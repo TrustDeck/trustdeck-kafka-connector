@@ -9,8 +9,14 @@ package org.trustdeck.connector.kafka.kafka;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -23,11 +29,14 @@ import org.mockito.InOrder;
 import org.springframework.kafka.support.Acknowledgment;
 import org.trustdeck.client.exception.RecordLinkageConflictException;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
+import org.trustdeck.connector.kafka.health.OutageCoordinator;
+import org.trustdeck.connector.kafka.listener.ConnectorListener;
 import org.trustdeck.connector.kafka.mapping.JsonMessageMapper;
 import org.trustdeck.connector.kafka.mapping.MappedMessage;
 import org.trustdeck.connector.kafka.mapping.MappingException;
 import org.trustdeck.connector.kafka.operation.OperationService;
 import org.trustdeck.connector.kafka.operation.PseudonymBatchService;
+import org.trustdeck.connector.kafka.recovery.RecoveryPublisher;
 
 /** Verifies source offset safety and systemic-failure handling at the listener boundary. */
 class ConnectorListenerTest {
@@ -55,7 +64,7 @@ class ConnectorListenerTest {
         order.verify(acknowledgment).acknowledge(0);
         order.verify(acknowledgment).acknowledge(1);
         verify(recovery).publishDlt(eq(second), eq(null), eq("INVALID_MAPPING"), eq(0),
-                org.mockito.ArgumentMatchers.any(MappingException.class));
+                any(MappingException.class));
     }
 
     /** Ensures network failures pause consumption instead of being drained to the DLT. */
@@ -70,7 +79,7 @@ class ConnectorListenerTest {
         Acknowledgment acknowledgment = mock(Acknowledgment.class);
         ConsumerRecord<byte[], byte[]> source = record(0, new byte[] {1});
         when(mapper.map(source.value())).thenReturn(mapped());
-        when(operations.execute(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        when(operations.execute(any(), any()))
                 .thenThrow(new RuntimeException(new ConnectException("backend unavailable")));
 
         assertThrows(Exception.class, () -> new ConnectorListener(mapper, operations, recovery, properties, batches, outage)
@@ -78,9 +87,7 @@ class ConnectorListenerTest {
 
         verify(outage).pause("BACKEND_UNAVAILABLE", "domain", "entity", null);
         verify(acknowledgment, never()).acknowledge(0);
-        verify(recovery, never()).publishDlt(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt(),
-                org.mockito.ArgumentMatchers.any());
+        verify(recovery, never()).publishDlt(any(), any(), anyString(), anyInt(), any());
     }
 
     /** Ensures a recovery producer failure pauses processing before the source offset is acknowledged. */
@@ -95,9 +102,9 @@ class ConnectorListenerTest {
         Acknowledgment acknowledgment = mock(Acknowledgment.class);
         ConsumerRecord<byte[], byte[]> source = record(0, new byte[] {1});
         when(mapper.map(source.value())).thenThrow(new MappingException("invalid"));
-        org.mockito.Mockito.doThrow(new IllegalStateException("recovery broker unavailable")).when(recovery)
+        doThrow(new IllegalStateException("recovery broker unavailable")).when(recovery)
                 .publishDlt(eq(source), eq(null), eq("INVALID_MAPPING"), eq(0),
-                        org.mockito.ArgumentMatchers.any(MappingException.class));
+                        any(MappingException.class));
 
         assertThrows(Exception.class, () -> new ConnectorListener(mapper, operations, recovery, properties, batches, outage)
                 .onMessage(List.of(source), acknowledgment));
@@ -120,17 +127,14 @@ class ConnectorListenerTest {
         ConsumerRecord<byte[], byte[]> second = record(1, new byte[] {2});
         when(mapper.map(first.value())).thenReturn(mapped());
         when(mapper.map(second.value())).thenReturn(mapped());
-        org.mockito.Mockito.doThrow(new IllegalArgumentException("batch rejected")).when(batches)
-                .execute(org.mockito.ArgumentMatchers.anyList());
+        doThrow(new IllegalArgumentException("batch rejected")).when(batches).execute(anyList());
 
         new ConnectorListener(mapper, operations, recovery, properties, batches, outage)
                 .onMessage(List.of(first, second), acknowledgment);
 
-        verify(recovery, org.mockito.Mockito.times(2)).publishDlt(org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("TRANSIENT_OPERATION_FAILURE"),
-                org.mockito.ArgumentMatchers.eq(0), org.mockito.ArgumentMatchers.any(IllegalArgumentException.class));
-        verify(recovery, never()).publishUnknown(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(recovery, times(2)).publishDlt(any(), any(), eq("TRANSIENT_OPERATION_FAILURE"), eq(0),
+                any(IllegalArgumentException.class));
+        verify(recovery, never()).publishUnknown(any(), any(), any(), any());
     }
 
     /** Routes a TrustDeck linkage conflict to the review topic and acknowledges it. */
@@ -146,14 +150,14 @@ class ConnectorListenerTest {
         ConsumerRecord<byte[], byte[]> source = record(0, new byte[] {1});
         MappedMessage mapped = mapped();
         when(mapper.map(source.value())).thenReturn(mapped);
-        when(operations.execute(eq(mapped), org.mockito.ArgumentMatchers.any()))
+        when(operations.execute(eq(mapped), any()))
                 .thenThrow(mock(RecordLinkageConflictException.class));
 
         new ConnectorListener(mapper, operations, recovery, properties, batches, outage)
                 .onMessage(List.of(source), acknowledgment);
 
         verify(recovery).publishReview(eq(source), eq(mapped), eq(1),
-                org.mockito.ArgumentMatchers.any(RecordLinkageConflictException.class));
+                any(RecordLinkageConflictException.class));
         verify(acknowledgment).acknowledge(0);
     }
 

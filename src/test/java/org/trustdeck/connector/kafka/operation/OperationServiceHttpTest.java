@@ -24,10 +24,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
-import java.util.UUID;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.sun.net.httpserver.HttpExchange;
@@ -38,10 +40,10 @@ import org.junit.jupiter.api.Test;
 import org.trustdeck.client.TrustDeckClient;
 import org.trustdeck.client.exception.TrustDeckResponseException;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
-import org.trustdeck.connector.kafka.kafka.ManualReplayService;
-import org.trustdeck.connector.kafka.kafka.RecoveryEnvelope;
 import org.trustdeck.connector.kafka.mapping.JsonMessageMapper;
 import org.trustdeck.connector.kafka.mapping.MappedMessage;
+import org.trustdeck.connector.kafka.recovery.ManualReplayService;
+import org.trustdeck.connector.kafka.recovery.RecoveryEnvelope;
 
 /** Verifies operation dispatch and wire calls against a controlled HTTP server. */
 class OperationServiceHttpTest {
@@ -205,7 +207,8 @@ class OperationServiceHttpTest {
                 null, null, null, null, null, null, null, null);
 
         assertEquals(Boolean.TRUE, new OperationService(client(), properties).execute(selected));
-        assertEquals("GET /api/domains/source%2Fdomain/pseudonyms?id=0123456789&idType=case_number", requestLog.get(0));
+        assertTrue(requestLog.get(0).equals("GET /api/domains/source%2Fdomain/pseudonyms?id=0123456789&idType=case_number")
+                || requestLog.get(0).equals("GET /api/domains/source%2Fdomain/pseudonyms?idType=case_number&id=0123456789"));
         assertEquals("DELETE /api/domains/source%2Fdomain/pseudonyms?psn=012-000000009-2", requestLog.get(1));
         assertEquals(0, body(1).size());
     }
@@ -243,7 +246,7 @@ class OperationServiceHttpTest {
         RecoveryEnvelope envelope = new RecoveryEnvelope("1", "FAILED_DLT", "source", 0, 1,
                 null, "CREATE_ENTITY_AND_PSEUDONYM", "source/domain", "TRANSIENT_OPERATION_FAILURE", 503, 3,
                 "ENTITY_CREATED", "11111111-1111-1111-1111-111111111111", null,
-                java.util.Base64.getEncoder().encodeToString("{}".getBytes()), null, Map.of(), "replay");
+                Base64.getEncoder().encodeToString("{}".getBytes()), null, Map.of(), "replay");
 
         ManualReplayService replay = new ManualReplayService(new JsonMessageMapper(properties),
                 new OperationService(client(), properties), properties);
@@ -265,7 +268,7 @@ class OperationServiceHttpTest {
         RecoveryEnvelope envelope = new RecoveryEnvelope("1", "FAILED_DLT", "source", 0, 1,
                 null, "CREATE_ENTITY_AND_PSEUDONYM", "source/domain", "TRANSIENT_OPERATION_FAILURE", 503, 3,
                 "ENTITY_CREATED", "11111111-1111-1111-1111-111111111111", null,
-                java.util.Base64.getEncoder().encodeToString("{}".getBytes()), null, Map.of(), "replay");
+                Base64.getEncoder().encodeToString("{}".getBytes()), null, Map.of(), "replay");
         ManualReplayService replay = new ManualReplayService(new JsonMessageMapper(properties),
                 new OperationService(client(), properties), properties);
 
@@ -321,7 +324,7 @@ class OperationServiceHttpTest {
      */
     private void respond(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
-        requestBodies.add(new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+        requestBodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         String query = exchange.getRequestURI().getRawQuery();
         requestLog.add(exchange.getRequestMethod() + " " + exchange.getRequestURI().getRawPath()
                 + (query == null ? "" : "?" + query));
@@ -329,7 +332,7 @@ class OperationServiceHttpTest {
             String responseBody = lookupResponse && path.startsWith("/api/domains/")
                     ? "{\"identifierItem\":{\"identifier\":\"0123456789\",\"idType\":\"case_number\"},\"psn\":\"012-000000009-2\"}"
                     : "[]";
-            byte[] response = responseBody.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] response = responseBody.getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, response.length);
             exchange.getResponseBody().write(response);
             exchange.close();
@@ -338,7 +341,7 @@ class OperationServiceHttpTest {
         int status = responseStatus != 0 ? responseStatus : "DELETE".equals(exchange.getRequestMethod()) ? 204
                 : "PUT".equals(exchange.getRequestMethod()) ? 200 : 201;
         byte[] response = status == 204 ? new byte[0]
-                : "{\"identifierItem\":{\"identifier\":\"0123456789\",\"idType\":\"case_number\"},\"psn\":\"012-000000009-2\",\"trustdeckID\":\"11111111-1111-1111-1111-111111111111\",\"data\":{}}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                : "{\"identifierItem\":{\"identifier\":\"0123456789\",\"idType\":\"case_number\"},\"psn\":\"012-000000009-2\",\"trustdeckID\":\"11111111-1111-1111-1111-111111111111\",\"data\":{}}".getBytes(StandardCharsets.UTF_8);
         exchange.sendResponseHeaders(status, response.length);
         if (response.length > 0) {
             exchange.getResponseBody().write(response);

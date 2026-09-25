@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -24,10 +26,12 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
 import org.trustdeck.connector.kafka.mapping.MappedMessage;
+import org.trustdeck.connector.kafka.recovery.RecoveryPublisher;
 
 /** Verifies safe, confirmed recovery envelope publication. */
 class RecoveryPublisherTest {
@@ -35,15 +39,15 @@ class RecoveryPublisherTest {
     /** Ensures recovery retains source bytes but excludes unsafe headers. */
     @Test
     void publishesConfirmedEnvelopeWithSafeProvenance() throws Exception {
-        KafkaTemplate<String, String> template = mock(KafkaTemplate.class);
+        @SuppressWarnings("unchecked")
+		KafkaTemplate<String, String> template = mock(KafkaTemplate.class);
         ConnectorProperties properties = new ConnectorProperties();
         properties.setOperation("CREATE_ENTITY");
         properties.getRecovery().setDltTopic("source.DLT");
         ObjectMapper mapper = new ObjectMapper();
         CompletableFuture<SendResult<String, String>> confirmation = CompletableFuture.completedFuture(
                 new SendResult<>(null, new RecordMetadata(new TopicPartition("source.DLT", 0), 4, 0, 0, 0, 0)));
-        org.mockito.Mockito.when(template.send(eq("source.DLT"), eq("AQI="), org.mockito.ArgumentMatchers.anyString()))
-                .thenReturn(confirmation);
+       when(template.send(eq("source.DLT"), eq("AQI="), anyString())).thenReturn(confirmation);
 
         byte[] key = {1, 2};
         byte[] value = {3, 4};
@@ -56,7 +60,7 @@ class RecoveryPublisherTest {
         new RecoveryPublisher(template, properties, mapper).publishDlt(record, mapped, "INVALID_MAPPING", 2,
                 new IllegalArgumentException("bad input"));
 
-        var jsonCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+         ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
         verify(template).send(eq("source.DLT"), eq("AQI="), jsonCaptor.capture());
         JsonNode envelope = mapper.readTree(jsonCaptor.getValue());
         assertEquals("2", envelope.get("schemaVersion").asText());
@@ -74,11 +78,12 @@ class RecoveryPublisherTest {
     /** Ensures a failed producer confirmation prevents recovery publication from being treated as complete. */
     @Test
     void propagatesRecoveryProducerFailure() {
-        KafkaTemplate<String, String> template = mock(KafkaTemplate.class);
+        @SuppressWarnings("unchecked")
+		KafkaTemplate<String, String> template = mock(KafkaTemplate.class);
         ConnectorProperties properties = new ConnectorProperties();
         properties.setOperation("CREATE_ENTITY");
         properties.getRecovery().setDltTopic("source.DLT");
-        org.mockito.Mockito.when(template.send(eq("source.DLT"), eq(null), org.mockito.ArgumentMatchers.anyString()))
+         when(template.send(eq("source.DLT"), eq(null), anyString()))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable")));
 
         ConsumerRecord<byte[], byte[]> record = new ConsumerRecord<>("source", 0, 0, null, new byte[] {1});
