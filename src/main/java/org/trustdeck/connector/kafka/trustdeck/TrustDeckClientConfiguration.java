@@ -22,13 +22,18 @@ import org.springframework.context.annotation.Configuration;
 import org.trustdeck.client.TrustDeckClient;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
 
-/** Creates the shared immutable TrustDeck client and token provider. */
+/**
+ * Creates the shared immutable TrustDeck client and token provider.
+ * 
+ * @author Armin Müller
+ */
 @Configuration
 public class TrustDeckClientConfiguration {
 
-    /** Creates client bean configuration. */
-    public TrustDeckClientConfiguration() {
-    }
+    /**
+     * Creates client bean configuration.
+     */
+    public TrustDeckClientConfiguration() { }
 
     /**
      * Creates the shared resource client.
@@ -38,8 +43,7 @@ public class TrustDeckClientConfiguration {
      * @return TrustDeck client
      */
     @Bean
-    public TrustDeckClient trustDeckClient(ConnectorProperties properties,
-                                           ClientCredentialsTokenProvider tokenProvider) {
+    public TrustDeckClient trustDeckClient(ConnectorProperties properties, ClientCredentialsTokenProvider tokenProvider) {
         return new TrustDeckClient(properties.getTrustdeck().getServiceUrl(), tokenProvider,
                 properties.getConnectTimeout(), properties.getReadTimeout());
     }

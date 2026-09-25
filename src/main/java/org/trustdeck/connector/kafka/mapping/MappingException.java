@@ -17,10 +17,17 @@
 
 package org.trustdeck.connector.kafka.mapping;
 
-/** Indicates that a Kafka value cannot satisfy the configured mapping contract. */
+/**
+ * Indicates that a Kafka value cannot satisfy the configured mapping contract.
+ * 
+ * @author Armin Müller
+ */
 public class MappingException extends RuntimeException {
 
-    /**
+	/** This exception's UID. */
+    private static final long serialVersionUID = 8687269169769642307L;
+
+	/**
      * Creates a mapping failure.
      *
      * @param message safe diagnostic message

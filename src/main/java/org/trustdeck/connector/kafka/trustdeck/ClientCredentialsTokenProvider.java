@@ -32,73 +32,99 @@ import org.springframework.stereotype.Component;
 import org.trustdeck.client.AccessTokenProvider;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
 
-/** Thread-safe OAuth2 client-credentials token provider with expiry skew. */
+/**
+ * Acquires and caches OAuth access tokens using the client credentials grant.
+ *
+ * Tokens are reused until shortly before their reported expiry. Refreshes are
+ * synchronized so concurrent callers cannot trigger duplicate token requests.
+ * Token acquisition uses the configured client credentials and token endpoint.
+ *
+ * @author Armin Müller
+ */
 @Component
 public class ClientCredentialsTokenProvider implements AccessTokenProvider {
 
-    /** Refreshes before expiry to avoid using an almost-expired token. */
-    private static final Duration EXPIRY_SKEW = Duration.ofSeconds(30);
+	/** Refresh margin applied before the reported token expiry. */
+	private static final Duration EXPIRY_SKEW = Duration.ofSeconds(30);
 
-    /** Token HTTP client. */
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+	/** HTTP client used for OAuth token requests. */
+	private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
-    /** JSON parser. */
-    private final ObjectMapper mapper = new ObjectMapper();
+	/** JSON parser used for OAuth token responses. */
+	private final ObjectMapper mapper = new ObjectMapper();
 
-    /** OAuth settings. */
-    private final ConnectorProperties.TrustDeckProperties properties;
+	/** TrustDeck OAuth client credentials and token endpoint settings. */
+	private final ConnectorProperties.TrustDeckProperties properties;
 
-    /** Cached token value. */
-    private String token;
+	/** Cached bearer token without the authorization scheme prefix. */
+	private String token;
 
-    /** Cached token expiry. */
-    private Instant expiry = Instant.MIN;
+	/** Reported expiry time of the currently cached token. */
+	private Instant expiry = Instant.MIN;
 
-    /**
-     * Creates the provider.
-     *
-     * @param connectorProperties connector settings
-     */
-    public ClientCredentialsTokenProvider(ConnectorProperties connectorProperties) {
-        this.properties = connectorProperties.getTrustdeck();
-    }
+	/**
+	 * Creates the client credentials token provider.
+	 *
+	 * @param connectorProperties connector configuration containing OAuth settings
+	 */
+	public ClientCredentialsTokenProvider(ConnectorProperties connectorProperties) {
+		this.properties = connectorProperties.getTrustdeck();
+	}
 
-    /**
-     * Returns a cached token or refreshes it once under a lock.
-     *
-     * @return bearer token without prefix
-     */
-    @Override
-    public synchronized String getAccessToken() {
-        if (token != null && Instant.now().isBefore(expiry.minus(EXPIRY_SKEW))) {
-            return token;
-        }
-        try {
-            String credentials = properties.getClientId() + ":" + properties.getClientSecret();
-            HttpRequest request = HttpRequest.newBuilder(URI.create(properties.getTokenEndpoint()))
-                    .timeout(Duration.ofSeconds(30)).header("Authorization", "Basic "
-                            + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8)))
-                    .header("Content-Type", "application/x-www-form-urlencoded")
-                    .POST(HttpRequest.BodyPublishers.ofString("grant_type=client_credentials"))
-                    .build();
-            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalStateException("OAuth token endpoint returned HTTP " + response.statusCode());
-            }
-            JsonNode body = mapper.readTree(response.body());
-            JsonNode accessToken = body.get("access_token");
-            if (accessToken == null || !accessToken.isTextual() || accessToken.textValue().isBlank()) {
-                throw new IllegalStateException("OAuth token response did not contain access_token.");
-            }
-            token = accessToken.textValue();
-            long expiresIn = body.path("expires_in").asLong(300);
-            expiry = Instant.now().plusSeconds(Math.max(1, expiresIn));
-            return token;
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("OAuth token acquisition was interrupted.", exception);
-        } catch (Exception exception) {
-            throw new IllegalStateException("OAuth token acquisition failed.", exception);
-        }
-    }
+	/**
+	 * Returns a valid cached access token or obtains a new token from the OAuth endpoint.
+	 *
+	 * Cached tokens are refreshed before their reported expiry using
+	 * {@link #EXPIRY_SKEW}. Token refresh is synchronized so only one caller
+	 * performs the HTTP request at a time.
+	 *
+	 * @return bearer token value without the {@code Bearer} prefix
+	 * @throws IllegalStateException if token acquisition fails, is interrupted, or returns an invalid response
+	 */
+	@Override
+	public synchronized String getAccessToken() {
+		// Reuse the cached token while it remains safely outside the expiry margin
+		if (token != null && Instant.now().isBefore(expiry.minus(EXPIRY_SKEW))) {
+			return token;
+		}
+
+		try {
+			String credentials = properties.getClientId() + ":" + properties.getClientSecret();
+
+			// Request a token using the OAuth 2.0 client credentials grant
+			HttpRequest request = HttpRequest.newBuilder(URI.create(properties.getTokenEndpoint()))
+					.timeout(Duration.ofSeconds(30))
+					.header("Authorization", "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8)))
+					.header("Content-Type", "application/x-www-form-urlencoded")
+					.POST(HttpRequest.BodyPublishers.ofString("grant_type=client_credentials"))
+					.build();
+
+			HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+			if (response.statusCode() < 200 || response.statusCode() >= 300) {
+				throw new IllegalStateException("OAuth token endpoint returned HTTP " + response.statusCode());
+			}
+
+			JsonNode body = mapper.readTree(response.body());
+			JsonNode accessToken = body.get("access_token");
+
+			if (accessToken == null || !accessToken.isTextual() || accessToken.textValue().isBlank()) {
+				throw new IllegalStateException("OAuth token response did not contain access_token.");
+			}
+
+			token = accessToken.textValue();
+
+			// Use the reported lifetime, falling back to five minutes when omitted
+			long expiresIn = body.path("expires_in").asLong(300);
+			expiry = Instant.now().plusSeconds(Math.max(1, expiresIn));
+
+			return token;
+		} catch (InterruptedException exception) {
+			// Preserve the interrupted state for callers higher in the stack
+			Thread.currentThread().interrupt();
+			throw new IllegalStateException("OAuth token acquisition was interrupted.", exception);
+		} catch (Exception exception) {
+			throw new IllegalStateException("OAuth token acquisition failed.", exception);
+		}
+	}
 }

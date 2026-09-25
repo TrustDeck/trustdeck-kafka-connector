@@ -18,6 +18,8 @@
 package org.trustdeck.connector.kafka.config;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -27,15 +29,22 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
-/** Validated connector-wide settings and bounded processing limits. */
+/**
+ * Configuration properties controlling Kafka consumption, TrustDeck access,
+ * message mappings, recovery handling, and statistics collection.
+ *
+ * Instances are populated through Spring property binding and validated before
+ * the connector starts processing records.
+ * 
+ * @author Armin Müller
+ */
 @Data
 @Validated
 @ConfigurationProperties(prefix = "connector")
 public class ConnectorProperties {
 
     /** Creates empty settings for Spring property binding. */
-    public ConnectorProperties() {
-    }
+    public ConnectorProperties() { }
 
     /** Selected operation processed by this application instance. */
     @NotBlank
@@ -49,7 +58,7 @@ public class ConnectorProperties {
     @NotBlank
     private String groupId;
 
-    /** Maximum accepted Kafka value bytes. */
+    /** Maximum accepted Kafka value bytes for one record. */
     @Min(1)
     private int maxRecordBytes = 1_048_576;
 
@@ -57,17 +66,17 @@ public class ConnectorProperties {
     @Min(1)
     private int maxPollRecords = 100;
 
-    /** Number of listener containers. */
+    /** Number of concurrent Kafka consumers used to process source records. */
     @Min(1)
     private int concurrency = 2;
 
     /** Maximum records sent in one pseudonym create batch. */
     @Min(1)
-    private int batchSize = 100;
+    private int batchSize = 10_000;
 
     /** Maximum bytes sent in one pseudonym create batch. */
     @Min(1)
-    private int batchBytes = 262_144;
+    private int batchBytes = 1_048_576;
 
     /** HTTP connection timeout. */
     @NotNull
@@ -75,7 +84,7 @@ public class ConnectorProperties {
 
     /** HTTP response read timeout. */
     @NotNull
-    private Duration readTimeout = Duration.ofSeconds(30);
+    private Duration readTimeout = Duration.ofSeconds(60);
 
     /** TrustDeck and token endpoint settings. */
     @Valid
@@ -89,12 +98,23 @@ public class ConnectorProperties {
     @Valid
     private RecoveryProperties recovery = new RecoveryProperties();
 
-    /** TrustDeck connection and fixed resource target settings. */
+    /** Optional asynchronous runtime and backend statistics collection. */
+    @Valid
+    private StatisticsProperties statistics = new StatisticsProperties();
+
+    /**
+     * TrustDeck connection settings and optional fixed resource targets.
+     *
+     * Contains the service and token endpoints, OAuth client credentials, and
+     * optional project and entity type values used by operations that do not
+     * resolve these targets from incoming records.
+     */
     @Data
     public static class TrustDeckProperties {
-        /** Creates empty TrustDeck settings for property binding. */
-        public TrustDeckProperties() {
-        }
+        
+    	/** Creates empty TrustDeck settings for property binding. */
+        public TrustDeckProperties() { }
+        
         /** TrustDeck service base URL. */
         @NotBlank
         private String serviceUrl;
@@ -118,12 +138,18 @@ public class ConnectorProperties {
         private String entityType;
     }
 
-    /** Explicit JSON Pointer mappings and timestamp rules. */
+    /**
+     * Groups all source-to-TrustDeck mapping configurations.
+     *
+     * Common mappings are shared between operations, while update-specific mappings
+     * define how existing pseudonym values are located and replaced.
+     */
     @Data
     public static class MappingProperties {
-        /** Creates empty mapping settings for property binding. */
-        public MappingProperties() {
-        }
+        
+    	/** Creates empty mapping settings for property binding. */
+        public MappingProperties() { }
+        
         /** Mappings shared by the selected operation and entity operations. */
         @Valid
         private CommonMappingProperties common = new CommonMappingProperties();
@@ -131,76 +157,113 @@ public class ConnectorProperties {
         /** Selectors and replacement fields used only by pseudonym updates. */
         @Valid
         private UpdatePseudonymMappingProperties updatePseudonym = new UpdatePseudonymMappingProperties();
-
     }
 
-    /** Common mappings and conversion rules. */
+    /**
+     * Mapping settings shared by pseudonym and entity operations.
+     *
+     * Defines source paths, optional constant values, entity field mappings,
+     * timestamp conversion settings, and optional record-specific TrustDeck targets.
+     */
     @Data
     public static class CommonMappingProperties {
-        /** Creates common mappings with UTC as the default source timezone. */
-        public CommonMappingProperties() {
-        }
+        
+    	/** Creates common mappings with UTC as the default source timezone. */
+        public CommonMappingProperties() { }
+        
         /** Constant domain override. */
         private String domainConstant;
+        
         /** Message pointer for a domain. */
         private String domainPath;
+        
         /** Message pointer for the pseudonym identifier. */
         private String identifierPath;
+        
         /** Message pointer for the identifier type. */
         private String idTypePath;
+        
         /** Message pointer for an imported pseudonym value. */
         private String psnPath;
+        
         /** Optional message pointer for a pseudonym validity duration. */
         private String validityTimePath;
+        
         /** Message pointer for valid-from conversion. */
         private String validFromPath;
+        
         /** Message pointer for valid-to conversion. */
         private String validToPath;
+        
         /** Optional message pointer for source provenance. */
         private String usernamePath;
+        
         /** Optional message pointer for a project entity type. */
         private String entityTypePath;
+        
         /** Optional message pointer for a TrustDeck entity UUID. */
         private String entityIdPath;
+        
         /** Entity data mappings shared by entity create, update, and combined operations. */
-        private java.util.List<FieldMapping> entityFields = new java.util.ArrayList<>();
+        private List<FieldMapping> entityFields = new ArrayList<>();
+        
         /** IANA zone for offset-free source timestamps. */
         @NotBlank
         private String sourceTimezone = "UTC";
+        
         /** Strict format for offset-free timestamps. */
         private String datetimeFormat;
     }
 
-    /** Pseudonym update selectors and replacement mappings. */
+    /**
+     * Mapping settings specific to pseudonym update operations.
+     *
+     * Defines how the existing pseudonym is identified and which incoming values
+     * should replace its identifier, type, value, or domain.
+     */
     @Data
     public static class UpdatePseudonymMappingProperties {
+    	
         /** Creates empty pseudonym update mappings for property binding. */
-        public UpdatePseudonymMappingProperties() {
-        }
+        public UpdatePseudonymMappingProperties() { }
+        
         /** Message pointer for the old pseudonym identifier. */
         private String oldIdentifierPath;
+        
         /** Message pointer for the old pseudonym type. */
         private String oldIdTypePath;
+        
         /** Message pointer for the old pseudonym value. */
         private String oldPsnPath;
+        
         /** Message pointer for a replacement pseudonym identifier. */
         private String newIdentifierPath;
+        
         /** Message pointer for a replacement pseudonym type. */
         private String newIdTypePath;
+        
         /** Message pointer for a replacement pseudonym value. */
         private String newPsnPath;
+        
         /** Message pointer for the old pseudonym domain. */
         private String oldDomainPath;
+        
         /** Message pointer for a replacement pseudonym domain. */
         private String newDomainPath;
     }
 
-    /** One explicit source-to-target mapping for entity data or identifiers. */
+    /**
+     * Defines one source-to-target mapping for entity data.
+     *
+     * A mapping reads a value from the incoming record or uses a configured constant
+     * and writes the resulting value to the configured target JSON Pointer.
+     */
     @Data
     public static class FieldMapping {
-        /** Creates an empty field mapping for property binding. */
-        public FieldMapping() {
-        }
+        
+    	/** Creates an empty field mapping for property binding. */
+        public FieldMapping() { }
+        
         /** Source JSON Pointer or bare top-level field. */
         @NotBlank
         private String sourcePath;
@@ -216,12 +279,18 @@ public class ConnectorProperties {
         private String constant;
     }
 
-    /** DLT/review topics and bounded recovery behavior. */
+    /**
+     * Configures dead-letter, review, retry, and backend availability handling.
+     *
+     * Defines the recovery topics and the bounded retry behavior used when records
+     * cannot be processed successfully on the first attempt.
+     */
     @Data
     public static class RecoveryProperties {
-        /** Creates empty recovery settings for property binding. */
-        public RecoveryProperties() {
-        }
+        
+    	/** Creates empty recovery settings for property binding. */
+        public RecoveryProperties() { }
+        
         /** Dead-letter topic. */
         private String dltTopic;
 
@@ -237,5 +306,29 @@ public class ConnectorProperties {
 
         /** Availability probe interval. */
         private Duration probeInterval = Duration.ofSeconds(15);
+    }
+
+    /**
+     * Configures optional runtime and TrustDeck backend statistics collection.
+     *
+     * Controls whether statistics are collected, how frequently backend statistics
+     * are requested, and where the completed statistics file is written.
+     */
+    @Data
+    public static class StatisticsProperties {
+        
+    	/** Creates disabled statistics settings for property binding. */
+        public StatisticsProperties() { }
+
+        /** Whether statistics should be collected during a connector-run. */
+        private boolean enabled;
+
+        /** Delay between backend statistics requests. */
+        @NotNull
+        private Duration interval = Duration.ofSeconds(10);
+
+        /** Directory in which the completed run file is written. */
+        @NotBlank
+        private String outputDirectory = "statistics";
     }
 }

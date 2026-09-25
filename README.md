@@ -6,19 +6,16 @@ This Apache-2.0 application consumes one Kafka topic with one configured operati
 
 Prerequisites are Java 21, Maven 3.8.7 (the verified host version; Maven 3.x with the same POM/plugin compatibility is supported), Docker/Compose, Kafka ACLs, and an existing TrustDeck project/type/domain. The Docker builder supplies Maven 3.9.11 explicitly. Use a confidential Keycloak client with service accounts and client-credentials access. Grant the exact resource permissions described in the Delivery and Recovery section below; the JWT subject must be the TrustDeck service-account user's UUID. Keycloak realm-admin roles alone do not grant TrustDeck permissions.
 
-The released client `1.0.1` is not in Maven Central. This repository uses the approved, unpublished client commit `0133ed9` as `1.0.2-SNAPSHOT`:
+The connector uses the released `org.trustdeck:client:2.0.0` package from Maven Central:
 
 ```sh
-git clone https://github.com/TrustDeck/trustdeck-client.git
-git -C trustdeck-client checkout --detach 0133ed9
-mvn -f trustdeck-client/pom.xml clean install
 mvn clean verify
 ```
 
-For authenticated GitHub Packages instead, configure Maven `settings.xml` with a read token and change the client version to a published coordinate. Never put credentials in the POM, image, build args, or history. Docker clones and builds the pinned client commit in a disposable builder stage; it does not use the host Maven cache:
+No GitHub Packages credentials or local client checkout are required. Never put credentials in the POM, image, build args, or history:
 
 ```sh
-DOCKER_BUILDKIT=1 docker build --file docker/Dockerfile --build-arg TRUSTDECK_CLIENT_REF=0133ed9 -t trustdeck-kafka-connector:1.0.0 .
+docker build --file docker/Dockerfile -t trustdeck-kafka-connector:1.0.0 .
 ```
 
 Maven does not source `.env`. In WSL:
@@ -102,7 +99,7 @@ The base Compose file requires only an `.env`, read-only instance YAML/truststor
 
 ## Verification and Limitations
 
-The final local verification matrix is `mvn clean verify` (including strict Javadocs), `git diff --check`, both Compose config commands, the root-context Docker build above, and isolated container liveness/readiness probes. Generate and review the dependency/license inventory with `mvn org.codehaus.mojo:license-maven-plugin:2.7.0:add-third-party -Dlicense.includedScopes=compile,runtime`; inspect `target/generated-sources/license/THIRD-PARTY.txt`, including the pinned TrustDeck client and all transitives. The connector HTTP contract suite asserts method, path, query, payload, optional omission, selectors, UUIDs, `omitPrefix=false`, standard/complete updates, combined stages, replay, and ordinary-409 versus linkage-conflict handling for all seven operations. Disposable Kafka/Testcontainers tests use unique resources and never existing infrastructure or the production backlog. The connector consumes the client source at pinned commit `0133ed9`; build and test that client separately with `mvn -f trustdeck-client/pom.xml clean verify`. Do not publish the unpublished client build.
+The final local verification matrix is `mvn clean verify` (including strict Javadocs), `git diff --check`, both Compose config commands, the root-context Docker build, and isolated container liveness/readiness probes. Generate and review the dependency/license inventory with `mvn org.codehaus.mojo:license-maven-plugin:2.7.0:add-third-party -Dlicense.includedScopes=compile,runtime`; inspect `target/generated-sources/license/THIRD-PARTY.txt`, including the TrustDeck client and all transitives. The connector HTTP contract suite asserts method, path, query, payload, optional omission, selectors, UUIDs, `omitPrefix=false`, standard/complete updates, combined stages, replay, and ordinary-409 versus linkage-conflict handling for all seven operations. Disposable Kafka/Testcontainers tests use unique resources and never existing infrastructure or the production backlog.
 
 Before live deployment, verify synthetic resources and permissions with the TrustDeck service-account UUID: project/type read; enabled entity CRUD; required domain read; pseudonym create/read/update/delete and complete-update permissions; entity pseudonym listing for combined creation; optional pseudonym link/complete-view permissions only when configured; restricted DLT/review ACLs and retention; valid Keycloak client credentials; HTTPS/TLS truststore; and readiness/liveness plus a real end-to-end operation. The connector creates no backend resources.
 

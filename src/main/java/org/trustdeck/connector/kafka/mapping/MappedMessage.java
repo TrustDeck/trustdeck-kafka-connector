@@ -22,61 +22,70 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-/** Immutable result of mapping one source JSON object to connector fields.
- * @param domain resolved domain
- * @param identifier resolved identifier
- * @param idType resolved identifier type
- * @param psn resolved pseudonym
- * @param validityTime resolved validity duration
- * @param validFrom validity start
- * @param validTo validity end
- * @param username source user
- * @param entityType entity type
- * @param entityId entity UUID
- * @param entityData entity payload
- * @param oldIdentifier old identifier
- * @param oldIdType old identifier type
- * @param oldPsn old pseudonym
- * @param newIdentifier replacement identifier
- * @param newIdType replacement identifier type
- * @param newPsn replacement pseudonym
- * @param oldDomain old domain
- * @param newDomain replacement domain
+/**
+ * Immutable representation of a Kafka source record after connector mapping.
+ *
+ * The record contains the resolved pseudonym, validity, provenance, entity, and
+ * pseudonym-update values required by the configured TrustDeck operation. Fields
+ * that are not relevant to the selected operation may be {@code null}.
+ *
+ * @param domain resolved TrustDeck domain
+ * @param identifier resolved pseudonym identifier
+ * @param idType resolved pseudonym identifier type
+ * @param psn resolved or imported pseudonym value
+ * @param validityTime resolved pseudonym validity duration
+ * @param validFrom resolved validity start
+ * @param validTo resolved validity end
+ * @param username resolved source provenance user
+ * @param entityType resolved TrustDeck entity type
+ * @param entityId resolved TrustDeck entity UUID
+ * @param entityData mapped entity payload
+ * @param oldIdentifier current pseudonym identifier used for updates
+ * @param oldIdType current pseudonym identifier type used for updates
+ * @param oldPsn current pseudonym value used for updates
+ * @param newIdentifier replacement pseudonym identifier
+ * @param newIdType replacement pseudonym identifier type
+ * @param newPsn replacement pseudonym value
+ * @param oldDomain current pseudonym domain used for updates
+ * @param newDomain replacement pseudonym domain
+ *
+ * @author Armin Müller
  */
-public record MappedMessage(String domain, String identifier, String idType, String psn,
-                             String validityTime, LocalDateTime validFrom, LocalDateTime validTo, String username,
-                            String entityType, UUID entityId, ObjectNode entityData,
-                            String oldIdentifier, String oldIdType, String oldPsn,
-                             String newIdentifier, String newIdType, String newPsn,
-                             String oldDomain, String newDomain) {
+public record MappedMessage(String domain, String identifier, String idType, String psn, String validityTime, 
+		LocalDateTime validFrom, LocalDateTime validTo, String username, String entityType, UUID entityId, 
+		ObjectNode entityData, String oldIdentifier, String oldIdType, String oldPsn, String newIdentifier, 
+		String newIdType, String newPsn, String oldDomain, String newDomain) {
 
-    /** Keeps the original constructor available for callers without validity duration mapping.
-     * @param domain resolved domain
-     * @param identifier resolved identifier
-     * @param idType resolved identifier type
-     * @param psn resolved pseudonym
-     * @param validFrom validity start
-     * @param validTo validity end
-     * @param username source user
-     * @param entityType entity type
-     * @param entityId entity UUID
-     * @param entityData entity payload
-     * @param oldIdentifier old identifier
-     * @param oldIdType old identifier type
-     * @param oldPsn old pseudonym
-     * @param newIdentifier replacement identifier
-     * @param newIdType replacement identifier type
-     * @param newPsn replacement pseudonym
-     * @param oldDomain old domain
-     * @param newDomain replacement domain
-     */
-    public MappedMessage(String domain, String identifier, String idType, String psn,
-                         LocalDateTime validFrom, LocalDateTime validTo, String username,
-                         String entityType, UUID entityId, ObjectNode entityData,
-                         String oldIdentifier, String oldIdType, String oldPsn,
-                         String newIdentifier, String newIdType, String newPsn,
-                         String oldDomain, String newDomain) {
-        this(domain, identifier, idType, psn, null, validFrom, validTo, username, entityType, entityId, entityData,
-                oldIdentifier, oldIdType, oldPsn, newIdentifier, newIdType, newPsn, oldDomain, newDomain);
-    }
+	/**
+	 * Creates a mapped message without a pseudonym validity duration.
+	 *
+	 * This constructor preserves compatibility for callers that provide validity
+	 * start and end values but do not map {@code validityTime}.
+	 *
+	 * @param domain resolved TrustDeck domain
+	 * @param identifier resolved pseudonym identifier
+	 * @param idType resolved pseudonym identifier type
+	 * @param psn resolved or imported pseudonym value
+	 * @param validFrom resolved validity start
+	 * @param validTo resolved validity end
+	 * @param username resolved source provenance user
+	 * @param entityType resolved TrustDeck entity type
+	 * @param entityId resolved TrustDeck entity UUID
+	 * @param entityData mapped entity payload
+	 * @param oldIdentifier current pseudonym identifier used for updates
+	 * @param oldIdType current pseudonym identifier type used for updates
+	 * @param oldPsn current pseudonym value used for updates
+	 * @param newIdentifier replacement pseudonym identifier
+	 * @param newIdType replacement pseudonym identifier type
+	 * @param newPsn replacement pseudonym value
+	 * @param oldDomain current pseudonym domain used for updates
+	 * @param newDomain replacement pseudonym domain
+	 */
+	public MappedMessage(String domain, String identifier, String idType, String psn, LocalDateTime validFrom, 
+			LocalDateTime validTo, String username, String entityType, UUID entityId, ObjectNode entityData, 
+			String oldIdentifier, String oldIdType, String oldPsn, String newIdentifier, String newIdType, 
+			String newPsn, String oldDomain, String newDomain) {
+		this(domain, identifier, idType, psn, null, validFrom, validTo, username, entityType, entityId, entityData, 
+				oldIdentifier, oldIdType, oldPsn, newIdentifier, newIdType, newPsn, oldDomain, newDomain);
+	}
 }

@@ -1,30 +1,30 @@
 spring:
   application:
     name: trustdeck-kafka-connector
-  # The connector exposes the guarded replay endpoint and Actuator health URLs.
-  # It remains Kafka-driven; no application traffic is required for processing.
   main:
+    # The connector exposes the guarded replay endpoint and Actuator health URLs
+    # It remains Kafka-driven; no application traffic is required for processing
     web-application-type: servlet
   kafka:
-    # Standard Spring Kafka settings. Kafka credentials and the broker URL are required.
+    # Standard Spring Kafka settings: Kafka credentials and the broker URL are required
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
     consumer:
       group-id: ${KAFKA_GROUP_ID}
-      # Manual acknowledgments let the listener commit only after processing or recovery publication.
+      # Manual acknowledgments let the listener commit only after processing or recovery publication
       enable-auto-commit: false
-      # New groups start at the beginning; an existing committed offset still wins.
+      # New groups start at the beginning; an existing committed offset still wins
       auto-offset-reset: earliest
-      # Record count and fetch bytes bound one listener poll.
+      # Record count and fetch bytes bound one listener poll
       max-poll-records: ${KAFKA_MAX_POLL_RECORDS:100}
       max-partition-fetch-bytes: ${KAFKA_MAX_PARTITION_FETCH_BYTES:1048576}
       properties:
-        # Must exceed the worst sequential HTTP and retry budget.
+        # Must exceed the worst sequential HTTP and retry budget
         max.poll.interval.ms: ${KAFKA_MAX_POLL_INTERVAL_MS:300000}
     producer:
-      # Recovery records are not considered committed until the broker confirms them.
+      # Recovery records are not considered committed until the broker confirms them
       acks: all
       properties:
-        # Maximum DLT/review request size in bytes.
+        # Maximum DLT/review request size in bytes
         max.request.size: ${KAFKA_MAX_REQUEST_SIZE:1048576}
     properties:
       security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_SSL}
@@ -34,10 +34,10 @@ spring:
       ssl.truststore.password: ${KAFKA_TRUSTSTORE_PASSWORD:}
       ssl.truststore.type: ${KAFKA_TRUSTSTORE_TYPE:JKS}
   jackson:
-    # Omit absent optional fields from TrustDeck and recovery JSON.
+    # Omit absent optional fields from TrustDeck and recovery JSON
     default-property-inclusion: non_null
-  # Optional standard Spring Boot SMTP transport settings. SMTP_TO controls delivery.
   mail:
+    # Optional standard Spring Boot SMTP transport settings. SMTP_TO controls delivery
     host: ${SMTP_HOST:}
     port: ${SMTP_PORT:25}
     username: ${SMTP_USERNAME:}
@@ -51,14 +51,14 @@ spring:
       mail.smtp.writetimeout: ${SMTP_WRITE_TIMEOUT:10000}
 
 server:
-  # Port for /actuator/health/{readiness,liveness} and the guarded /internal/replay endpoint.
-  # This HTTP surface supports operations and probes; record processing remains Kafka-driven.
+  # Port for /actuator/health/{readiness,liveness} and the guarded /internal/replay endpoint
+  # This HTTP surface supports operations and probes; record processing remains Kafka-driven
   port: ${HEALTH_PORT:8080}
-  # Allow listener containers and in-flight recovery publication to finish on shutdown.
+  # Allow listener containers and in-flight recovery publication to finish on shutdown
   shutdown: graceful
 
 management:
-  # Expose only health; details are intentionally hidden.
+  # Expose only health; details are intentionally hidden
   endpoints:
     web:
       exposure:
@@ -76,7 +76,7 @@ management:
         include: livenessState
 
 connector:
-  # One fixed operation is selected per connector instance.
+  # One fixed operation is selected per connector instance
   operation: ${TRUSTDECK_OPERATION}
   source-topic: ${KAFKA_TOPIC}
   group-id: ${KAFKA_GROUP_ID}
@@ -131,3 +131,8 @@ connector:
     max-attempts: ${RECOVERY_MAX_ATTEMPTS:3}
     initial-backoff: ${RECOVERY_INITIAL_BACKOFF:1s}
     probe-interval: ${RECOVERY_PROBE_INTERVAL:15s}
+  statistics:
+    # Disabled by default because each sample makes authenticated backend requests
+    enabled: ${CONNECTOR_STATISTICS_ENABLED:false}
+    interval: ${CONNECTOR_STATISTICS_INTERVAL:10s}
+    output-directory: ${CONNECTOR_STATISTICS_OUTPUT_DIRECTORY:statistics}

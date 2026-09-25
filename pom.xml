@@ -17,7 +17,7 @@
 
     <properties>
         <java.version>21</java.version>
-        <trustdeck.client.version>1.0.2-SNAPSHOT</trustdeck.client.version>
+        <trustdeck.client.version>2.0.0</trustdeck.client.version>
         <testcontainers.version>1.21.3</testcontainers.version>
     </properties>
 
@@ -47,7 +47,7 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
-        <!-- TrustDeck resource client (License: Apache-2.0; unpublished pinned development build). -->
+        <!-- TrustDeck resource client (License: Apache-2.0; Maven Central). -->
         <dependency>
             <groupId>org.trustdeck</groupId>
             <artifactId>client</artifactId>
@@ -81,14 +81,12 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>kafka</artifactId>
-            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
         <!-- JUnit lifecycle integration for disposable Kafka tests (License: EPL-2.0). -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -23,14 +23,19 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-/** Starts the single-purpose TrustDeck Kafka Connector application. */
+/**
+ * Starts the TrustDeck Kafka Connector instance.
+ *
+ * @author Armin Müller
+ */
 @SpringBootApplication
 @EnableScheduling
 public class TrustDeckKafkaConnectorApplication {
 
-    /** Creates the application entry point. */
-    public TrustDeckKafkaConnectorApplication() {
-    }
+    /**
+     * Creates the application entry point.
+     */
+    public TrustDeckKafkaConnectorApplication() { }
 
     /**
      * Starts the connector with a UTC JVM default for any library code that uses the default zone.

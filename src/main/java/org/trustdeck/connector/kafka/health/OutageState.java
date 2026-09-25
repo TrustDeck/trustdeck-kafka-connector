@@ -15,51 +15,62 @@
  * limitations under the License.
  */
 
-package org.trustdeck.connector.kafka.kafka;
+package org.trustdeck.connector.kafka.health;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.stereotype.Component;
 
-/** Small shared state used by readiness and listener recovery handling. */
+/**
+ * Stores the shared outage state of the connector.
+ *
+ * The state tracks whether source consumption is currently paused and retains
+ * the sanitized reason for the most recent pause operation.
+ *
+ * @author Armin Müller
+ */
 @Component
 public class OutageState {
 
-    /** Creates initially healthy connector state. */
-    public OutageState() {
-    }
-
-    /** Current paused state. */
+    /** Indicates whether connector consumption is currently paused. */
     private final AtomicBoolean paused = new AtomicBoolean();
 
-    /** Last sanitized reason. */
+    /** Sanitized reason associated with the current or most recent pause state. */
     private volatile String reason = "";
 
     /**
-     * Marks the connector paused.
-     *
-     * @param value whether paused
-     * @param newReason sanitized reason
+     * Creates an initially healthy connector state.
      */
+    public OutageState() { }
+
+    /**
+	 * Updates the connector pause state and associated reason.
+	 *
+	 * A {@code null} reason is normalized to an empty string before the new
+	 * state becomes visible to other components.
+	 *
+	 * @param value whether connector consumption is paused or not
+	 * @param newReason sanitized reason associated with the state change
+	 */
     public void setPaused(boolean value, String newReason) {
         reason = newReason == null ? "" : newReason;
         paused.set(value);
     }
 
     /**
-     * Returns whether consumption is paused.
-     *
-     * @return true when paused
-     */
+	 * Returns whether connector consumption is currently paused.
+	 *
+	 * @return {@code true} when consumption is paused, otherwise {@code false}
+	 */
     public boolean isPaused() {
         return paused.get();
     }
 
     /**
-     * Returns the sanitized pause reason.
-     *
-     * @return pause reason
-     */
+	 * Returns the sanitized reason associated with the current outage state.
+	 *
+	 * @return sanitized pause reason, or an empty string if none is set
+	 */
     public String getReason() {
         return reason;
     }

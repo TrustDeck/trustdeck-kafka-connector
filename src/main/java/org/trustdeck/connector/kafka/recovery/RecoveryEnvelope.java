@@ -15,68 +15,79 @@
  * limitations under the License.
  */
 
-package org.trustdeck.connector.kafka.kafka;
+package org.trustdeck.connector.kafka.recovery;
 
 import java.time.Instant;
 import java.util.Map;
 
-/** Versioned, replayable recovery record without credentials or arbitrary headers.
- * @param schemaVersion envelope schema version
- * @param status terminal status
- * @param sourceTopic source topic
- * @param partition source partition
- * @param offset source offset
- * @param sourceTimestamp source timestamp
- * @param operation operation name
- * @param resolvedTarget resolved target
- * @param failureCategory safe failure category
- * @param httpStatus HTTP status when available
- * @param attempts attempt count
- * @param completedStage completed combined-operation stage
- * @param completedUuid completed entity UUID
- * @param keyBase64 original key
- * @param valueBase64 original value
- * @param username source user
- * @param safeHeaders allowlisted source headers
- * @param manualGuidance bounded operator guidance
- * @param targetProject resolved entity project
- * @param targetEntityType resolved entity type
+/**
+ * Immutable recovery record containing the preserved Kafka source data and the
+ * metadata required for diagnostics, reconciliation, and explicit replay.
+ *
+ * The envelope identifies the original Kafka record, the connector operation,
+ * the resolved TrustDeck target, the sanitized failure outcome, optional
+ * completed-stage metadata, and the Base64-encoded original key and value.
+ *
+ * @param schemaVersion recovery envelope schema version
+ * @param status terminal recovery status
+ * @param sourceTopic original Kafka source topic
+ * @param partition original Kafka source partition
+ * @param offset original Kafka source offset
+ * @param sourceTimestamp original Kafka record timestamp
+ * @param operation connector operation that processed the record
+ * @param resolvedTarget resolved TrustDeck target, typically the domain
+ * @param failureCategory sanitized failure category
+ * @param httpStatus related HTTP status, if available
+ * @param attempts number of completed processing attempts
+ * @param completedStage confirmed completed stage of a multi-stage operation, if any
+ * @param completedUuid UUID associated with the confirmed completed stage, if any
+ * @param keyBase64 Base64-encoded original Kafka key
+ * @param valueBase64 Base64-encoded original Kafka value
+ * @param username mapped source provenance user, if available
+ * @param safeHeaders sanitized Kafka headers safe for recovery storage
+ * @param manualGuidance operator guidance for handling the recovery record
+ * @param targetProject resolved TrustDeck project, if relevant
+ * @param targetEntityType resolved TrustDeck entity type, if relevant
+ *
+ * @author Armin Müller
  */
-public record RecoveryEnvelope(String schemaVersion, String status, String sourceTopic, int partition,
-                               long offset, Instant sourceTimestamp, String operation, String resolvedTarget,
-                               String failureCategory, Integer httpStatus, int attempts,
-                                 String completedStage, String completedUuid, String keyBase64,
-                                 String valueBase64, String username, Map<String, String> safeHeaders,
-                                 String manualGuidance, String targetProject, String targetEntityType) {
+public record RecoveryEnvelope(String schemaVersion, String status, String sourceTopic, int partition, long offset, 
+		Instant sourceTimestamp, String operation, String resolvedTarget, String failureCategory, Integer httpStatus, 
+		int attempts, String completedStage, String completedUuid, String keyBase64, String valueBase64, String username, 
+		Map<String, String> safeHeaders, String manualGuidance, String targetProject, String targetEntityType) {
 
-    /** Keeps the original envelope constructor available for existing persisted envelopes.
-     * @param schemaVersion envelope schema version
-     * @param status terminal status
-     * @param sourceTopic source topic
-     * @param partition source partition
-     * @param offset source offset
-     * @param sourceTimestamp source timestamp
-     * @param operation operation name
-     * @param resolvedTarget resolved target
-     * @param failureCategory safe failure category
-     * @param httpStatus HTTP status
-     * @param attempts attempt count
-     * @param completedStage completed stage
-     * @param completedUuid completed UUID
-     * @param keyBase64 original key
-     * @param valueBase64 original value
-     * @param username source user
-     * @param safeHeaders safe headers
-     * @param manualGuidance operator guidance
-     */
-    public RecoveryEnvelope(String schemaVersion, String status, String sourceTopic, int partition,
-                            long offset, Instant sourceTimestamp, String operation, String resolvedTarget,
-                            String failureCategory, Integer httpStatus, int attempts,
-                            String completedStage, String completedUuid, String keyBase64,
-                            String valueBase64, String username, Map<String, String> safeHeaders,
-                            String manualGuidance) {
-        this(schemaVersion, status, sourceTopic, partition, offset, sourceTimestamp, operation, resolvedTarget,
-                failureCategory, httpStatus, attempts, completedStage, completedUuid, keyBase64, valueBase64,
-                username, safeHeaders, manualGuidance, null, null);
-    }
+	/**
+	 * Creates a recovery envelope without explicit project or entity-type target metadata.
+	 *
+	 * This constructor preserves compatibility with existing persisted envelopes
+	 * created before these target fields were added.
+	 *
+	 * @param schemaVersion recovery envelope schema version
+	 * @param status terminal recovery status
+	 * @param sourceTopic original Kafka source topic
+	 * @param partition original Kafka source partition
+	 * @param offset original Kafka source offset
+	 * @param sourceTimestamp original Kafka record timestamp
+	 * @param operation connector operation that processed the record
+	 * @param resolvedTarget resolved TrustDeck target
+	 * @param failureCategory sanitized failure category
+	 * @param httpStatus related HTTP status, if available
+	 * @param attempts number of completed processing attempts
+	 * @param completedStage confirmed completed operation stage, if any
+	 * @param completedUuid UUID associated with the completed stage, if any
+	 * @param keyBase64 Base64-encoded original Kafka key
+	 * @param valueBase64 Base64-encoded original Kafka value
+	 * @param username mapped source provenance user, if available
+	 * @param safeHeaders sanitized Kafka headers
+	 * @param manualGuidance operator guidance for handling the recovery record
+	 */
+	public RecoveryEnvelope(String schemaVersion, String status, String sourceTopic, int partition, long offset, 
+			Instant sourceTimestamp, String operation, String resolvedTarget, String failureCategory, Integer httpStatus, 
+			int attempts, String completedStage, String completedUuid, String keyBase64, String valueBase64, String username, 
+			Map<String, String> safeHeaders, String manualGuidance) {
+		
+		this(schemaVersion, status, sourceTopic, partition, offset, sourceTimestamp, operation, resolvedTarget,
+				failureCategory, httpStatus, attempts, completedStage, completedUuid, keyBase64, valueBase64,
+				username, safeHeaders, manualGuidance, null, null);
+	}
 }

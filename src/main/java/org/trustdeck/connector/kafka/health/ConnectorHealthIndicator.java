@@ -20,9 +20,15 @@ package org.trustdeck.connector.kafka.health;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
-import org.trustdeck.connector.kafka.kafka.OutageState;
 
-/** Reports readiness-impacting connector pause state without exposing sensitive details. */
+/**
+ * Exposes the connector readiness state through Spring Boot Actuator.
+ *
+ * The connector is reported as unhealthy while processing is paused because of
+ * a detected outage and as healthy while normal processing is running.
+ * 
+ * @author Armin Müller
+ */
 @Component("connector")
 public class ConnectorHealthIndicator implements HealthIndicator {
 
@@ -30,24 +36,29 @@ public class ConnectorHealthIndicator implements HealthIndicator {
     private final OutageState state;
 
     /**
-     * Creates the indicator.
-     *
-     * @param state outage state
-     */
+	 * Creates a health indicator backed by the shared connector outage state.
+	 *
+	 * @param state outage state used to determine connector readiness
+	 */
     public ConnectorHealthIndicator(OutageState state) {
         this.state = state;
     }
 
     /**
-     * Returns readiness health.
-     *
-     * @return health status
-     */
+	 * Returns the current readiness health of the connector.
+	 *
+	 * A paused connector is reported as {@link Status#DOWN}; otherwise it is
+	 * reported as {@link Status#UP}. The current processing state is included
+	 * as a health detail.
+	 *
+	 * @return current connector health status
+	 */
     @Override
     public Health health() {
         if (state.isPaused()) {
             return Health.down().withDetail("state", "paused").build();
         }
+        
         return Health.up().withDetail("state", "running").build();
     }
 }
