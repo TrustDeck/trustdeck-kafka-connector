@@ -34,6 +34,24 @@ The root `config/instance` directory is retained for deployment-only overrides: 
 
 The explicit `server.shutdown: graceful` setting is retained because the application owns manual acknowledgments and recovery publication; graceful Spring shutdown gives those in-flight operations time to finish during the Compose 45-second stop grace period.
 
+### Statistics
+
+Kafka record and batch counters are maintained continuously without retaining historical snapshots in memory. When enabled, TrustDeck project and system statistics are sampled at `CONNECTOR_STATISTICS_INTERVAL` and streamed into a hidden temporary file in the configured output directory. The active segment is finalized and atomically published after 24 hours, after reaching 256 MiB, or during graceful shutdown. Age and size limits are configurable, and completed rotated files are available while the connector continues running.
+
+Daily rotation is recommended over weekly rotation for manageable file sizes and easier analysis. The size limit is a soft maximum: a segment may exceed it by at most one complete snapshot plus the small JSON-closing metadata because snapshots are never split between files. Abrupt termination can leave the current hidden temporary file incomplete; it is not published as a completed `.json` file.
+
+For a large historical import, use a one-minute sampling interval and daily rotation:
+
+```dotenv
+CONNECTOR_STATISTICS_ENABLED=true
+CONNECTOR_STATISTICS_INTERVAL=1m
+CONNECTOR_STATISTICS_OUTPUT_DIRECTORY=/app/statistics
+CONNECTOR_STATISTICS_MAX_FILE_AGE=1d
+CONNECTOR_STATISTICS_MAX_FILE_SIZE=256MB
+```
+
+Each completed segment retains the JSON fields `startedAt`, `finishedAt`, `records`, `batches`, `averageBatchMillis`, and `samples`. Segment counters and snapshot counters are relative to that segment; the listener's atomic process counters are not reset during rotation.
+
 ## Permissions
 
 Grant the service-account user only the permissions required by the selected operation: `project:read`, `type:read`, and the enabled entity CRUD permissions for entity operations; `domain:read` on each configured domain; `pseudonym:create` for pseudonym creation and `pseudonym:create-batch` when batching is enabled; `pseudonym:read` and `pseudonym:delete` for exact lookup/deletion; `pseudonym:update` and `pseudonym:update-complete` when the corresponding update paths are enabled; `entity:list-pseudonyms` for combined creation; and `pseudonym:read`/`pseudonym:link` only where linked-pseudonym verification is configured. Do not grant domain/project/type creation, global administration, `entity:resolve-linkage`, `pseudonym:read-batch`, or `pseudonym:delete-batch`. Restrict DLT/review topic ACLs and retention separately.

@@ -136,3 +136,5 @@ connector:
     enabled: ${CONNECTOR_STATISTICS_ENABLED:false}
     interval: ${CONNECTOR_STATISTICS_INTERVAL:10s}
     output-directory: ${CONNECTOR_STATISTICS_OUTPUT_DIRECTORY:statistics}
+    max-file-age: ${CONNECTOR_STATISTICS_MAX_FILE_AGE:1d}
+    max-file-size: ${CONNECTOR_STATISTICS_MAX_FILE_SIZE:256MB}

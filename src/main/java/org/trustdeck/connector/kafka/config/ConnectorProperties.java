@@ -27,6 +27,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.util.unit.DataSize;
 import org.springframework.validation.annotation.Validated;
 
 /**
@@ -312,7 +313,7 @@ public class ConnectorProperties {
      * Configures optional runtime and TrustDeck backend statistics collection.
      *
      * Controls whether statistics are collected, how frequently backend statistics
-     * are requested, and where the completed statistics file is written.
+     * are requested, and how active statistics files are rotated.
      */
     @Data
     public static class StatisticsProperties {
@@ -327,8 +328,16 @@ public class ConnectorProperties {
         @NotNull
         private Duration interval = Duration.ofSeconds(10);
 
-        /** Directory in which the completed run file is written. */
+        /** Directory in which completed statistics segments are written. */
         @NotBlank
         private String outputDirectory = "statistics";
+
+        /** Maximum elapsed age of one statistics segment. */
+        @NotNull
+        private Duration maxFileAge = Duration.ofDays(1);
+
+        /** Maximum configured size of one statistics segment. */
+        @NotNull
+        private DataSize maxFileSize = DataSize.ofMegabytes(256);
     }
 }

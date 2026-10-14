@@ -7,6 +7,8 @@ connector:
     enabled: false
     interval: 10s
     output-directory: statistics
+    max-file-age: 1d
+    max-file-size: 256MB
   trustdeck:
     service-url: https://trustdeck.example.invalid
     token-endpoint: https://keycloak.example.invalid/realms/trustdeck/protocol/openid-connect/token
@@ -14,10 +16,10 @@ connector:
     client-secret: replace-me
   mapping:
     common:
-      domain-path: /c_source_domain
-      identifier-path: /c_value
-      id-type-path: /c_type_of_pseudonym
-      psn-path: /c_pseudonym
-      valid-from-path: /t_timestamp
+      domain-path: /source_domain
+      identifier-path: /identifier
+      id-type-path: /type_of_identifier
+      psn-path: /pseudonym
+      valid-from-path: /timestamp
       source-timezone: Europe/Berlin
       datetime-format: uuuu-MM-dd HH:mm:ss.SSS

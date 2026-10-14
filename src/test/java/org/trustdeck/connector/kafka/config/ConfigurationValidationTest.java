@@ -9,9 +9,11 @@ package org.trustdeck.connector.kafka.config;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.util.unit.DataSize;
 
 /** Verifies operation-aware startup validation without contacting external services. */
 class ConfigurationValidationTest {
@@ -67,6 +69,18 @@ class ConfigurationValidationTest {
         properties.getMapping().getCommon().setEntityFields(List.of(field));
 
         assertThrows(IllegalArgumentException.class, () -> new ConfigurationValidation(properties));
+    }
+
+    /** Statistics age and size limits must both be positive. */
+    @Test
+    void statisticsRotationLimitsMustBePositive() {
+        ConnectorProperties ageProperties = base("CREATE_PSEUDONYM");
+        ageProperties.getStatistics().setMaxFileAge(Duration.ZERO);
+        assertThrows(IllegalArgumentException.class, () -> new ConfigurationValidation(ageProperties));
+
+        ConnectorProperties sizeProperties = base("CREATE_PSEUDONYM");
+        sizeProperties.getStatistics().setMaxFileSize(DataSize.ofBytes(0));
+        assertThrows(IllegalArgumentException.class, () -> new ConfigurationValidation(sizeProperties));
     }
 
     private ConnectorProperties base(String operation) {

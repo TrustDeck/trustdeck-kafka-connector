@@ -83,9 +83,15 @@ public class ConfigurationValidation {
 			throw new IllegalArgumentException("HTTP timeouts must be positive and finite.");
 		}
 		
-		if (properties.getStatistics().getInterval().isZero() || properties.getStatistics().getInterval().isNegative()
-				|| blank(properties.getStatistics().getOutputDirectory())) {
-			throw new IllegalArgumentException("Statistics interval must be positive and output directory must be set.");
+		if (properties.getStatistics().getInterval() == null || properties.getStatistics().getInterval().isZero()
+				|| properties.getStatistics().getInterval().isNegative()
+				|| blank(properties.getStatistics().getOutputDirectory())
+				|| properties.getStatistics().getMaxFileAge() == null
+				|| properties.getStatistics().getMaxFileAge().isZero()
+				|| properties.getStatistics().getMaxFileAge().isNegative()
+				|| properties.getStatistics().getMaxFileSize() == null
+				|| properties.getStatistics().getMaxFileSize().toBytes() <= 0) {
+			throw new IllegalArgumentException("Statistics interval, maximum file age, and maximum file size must be positive; output directory must be set.");
 		}
 		
 		// Use predictable recovery topic names when none were configured explicitly
