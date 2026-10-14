@@ -42,7 +42,7 @@ public class ManualReplayService {
 	 * Creates the manual replay service.
 	 *
 	 * @param mapper source message mapper
-	 * @param operationService TrustDeck operation dispatcher
+	 * @param operations TrustDeck operation dispatcher
 	 * @param properties connector configuration
 	 */
 	public ManualReplayService(JsonMessageMapper mapper, OperationService operations, ConnectorProperties properties) {
