@@ -6,9 +6,11 @@
  */
 package org.trustdeck.connector.kafka.health;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.trustdeck.connector.kafka.listener.FailureClassifier;
 import org.trustdeck.connector.kafka.notification.NotificationService;
 import org.trustdeck.connector.kafka.trustdeck.TrustDeckPreflight;
 
@@ -22,6 +24,7 @@ import org.trustdeck.connector.kafka.trustdeck.TrustDeckPreflight;
  * 
  * @author Armin Müller
  */
+@Slf4j
 @Component
 public class OutageCoordinator {
 
@@ -45,6 +48,9 @@ public class OutageCoordinator {
 
     /** Project associated with the retained dynamic entity type, if any. */
     private volatile String failedProject;
+
+    /** Cause chain of the last failed probe, used to log changes only once at WARN level. */
+    private String lastProbeFailure;
 
     /**
 	 * Creates the outage coordinator.
@@ -115,6 +121,7 @@ public class OutageCoordinator {
         });
         
         if (!alreadyPaused) {
+            log.warn("Consumption paused: {}", reason);
             notifications.send("TrustDeck outage", "Consumption paused: " + reason);
         }
     }
@@ -155,10 +162,19 @@ public class OutageCoordinator {
             failedDomain = null;
             failedEntityType = null;
             failedProject = null;
+            lastProbeFailure = null;
             
+            log.info("Recovery probe succeeded; consumption resumed.");
             notifications.send("TrustDeck recovered", "Authenticated read-only probe succeeded; consumption resumed.");
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException failure) {
             // Keep the source paused until an authenticated read-only probe succeeds
+            String description = FailureClassifier.describe(failure);
+            if (!description.equals(lastProbeFailure)) {
+                log.warn("Recovery probe failed; consumption stays paused: {}", description);
+                lastProbeFailure = description;
+            } else {
+                log.debug("Recovery probe failed again: {}", description);
+            }
         }
     }
 }

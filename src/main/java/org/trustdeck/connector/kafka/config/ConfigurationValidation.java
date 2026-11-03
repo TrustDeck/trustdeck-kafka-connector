@@ -94,6 +94,11 @@ public class ConfigurationValidation {
 			throw new IllegalArgumentException("Statistics interval, maximum file age, and maximum file size must be positive; output directory must be set.");
 		}
 		
+		if (properties.getRecovery().getBatchTimeBudget() == null || properties.getRecovery().getBatchTimeBudget().isZero()
+				|| properties.getRecovery().getBatchTimeBudget().isNegative()) {
+			throw new IllegalArgumentException("recovery.batch-time-budget must be positive.");
+		}
+
 		// Use predictable recovery topic names when none were configured explicitly
 		if (blank(properties.getRecovery().getDltTopic())) {
 			properties.getRecovery().setDltTopic(properties.getSourceTopic() + ".DLT");

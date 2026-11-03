@@ -79,7 +79,7 @@ public class ClientCredentialsTokenProvider implements AccessTokenProvider {
 	 * performs the HTTP request at a time.
 	 *
 	 * @return bearer token value without the {@code Bearer} prefix
-	 * @throws IllegalStateException if token acquisition fails, is interrupted, or returns an invalid response
+	 * @throws TokenAcquisitionException if token acquisition fails, is interrupted, or returns an invalid response
 	 */
 	@Override
 	public synchronized String getAccessToken() {
@@ -122,9 +122,9 @@ public class ClientCredentialsTokenProvider implements AccessTokenProvider {
 		} catch (InterruptedException exception) {
 			// Preserve the interrupted state for callers higher in the stack
 			Thread.currentThread().interrupt();
-			throw new IllegalStateException("OAuth token acquisition was interrupted.", exception);
+			throw new TokenAcquisitionException("OAuth token acquisition was interrupted.", exception);
 		} catch (Exception exception) {
-			throw new IllegalStateException("OAuth token acquisition failed.", exception);
+			throw new TokenAcquisitionException("OAuth token acquisition failed.", exception);
 		}
 	}
 }

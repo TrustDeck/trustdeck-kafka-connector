@@ -34,6 +34,7 @@ import org.trustdeck.client.TrustDeckClient;
 import org.trustdeck.client.model.ProjectStatistics;
 import org.trustdeck.client.model.SystemStatistics;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
+import org.trustdeck.connector.kafka.listener.FailureClassifier;
 
 /**
  * Collects connector runtime metrics together with periodic TrustDeck backend statistics.
@@ -258,7 +259,7 @@ public class ConnectorStatistics {
 			}
 			system = client.system().getStatistics();
 		} catch (Exception exception) {
-			log.warn("Unable to collect TrustDeck connector statistics sample: {}", exception.getClass().getSimpleName());
+			log.warn("Unable to collect TrustDeck connector statistics sample: {}", FailureClassifier.describe(exception));
 			project = null;
 			system = null;
 			error = exception.getClass().getSimpleName() + ": " + exception.getMessage();

@@ -307,6 +307,13 @@ public class ConnectorProperties {
 
         /** Availability probe interval. */
         private Duration probeInterval = Duration.ofSeconds(15);
+
+        /**
+         * Time after which the listener starts no further record or retry within one
+         * poll; the remaining records are redelivered by the next poll. Must leave room
+         * for one in-flight attempt below {@code max.poll.interval.ms}.
+         */
+        private Duration batchTimeBudget = Duration.ofSeconds(120);
     }
 
     /**
