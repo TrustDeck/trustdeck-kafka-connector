@@ -136,6 +136,13 @@ class FailureClassifierTest {
                 FailureClassifier.describe(failure));
     }
 
+    /** HTTP failures name their status so 401 and 403 can be told apart in the log. */
+    @Test
+    void describesHttpStatus() {
+        assertEquals("RuntimeException <- TrustDeckResponseException(403)",
+                FailureClassifier.describe(new RuntimeException(response(403))));
+    }
+
     private static Exception library(Throwable cause) {
         return new TrustDeckClientLibraryException("TrustDeck request failed.", cause);
     }

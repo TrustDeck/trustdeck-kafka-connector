@@ -17,6 +17,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
@@ -217,7 +218,77 @@ class ConnectorListenerTest {
                 mock(OutageCoordinator.class)).onMessage(List.of(record(0, new byte[] {1}), record(1, new byte[] {2})), acknowledgment);
 
         verify(operations, never()).execute(any(), any());
-        verify(acknowledgment).acknowledge();
+        verify(acknowledgment).acknowledge(1);
+    }
+
+    /** A poll spanning two partitions is sent as one batch per partition instead of record by record. */
+    @Test
+    void splitsMixedPartitionPollIntoBatches() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        when(mapper.map(any())).thenReturn(mapped());
+        when(batches.execute(anyList())).thenReturn(Set.of(0, 1));
+        List<ConsumerRecord<byte[], byte[]>> poll = List.of(record(0, 0, new byte[] {1}), record(0, 1, new byte[] {2}),
+                record(1, 0, new byte[] {3}), record(1, 1, new byte[] {4}));
+
+        new ConnectorListener(mapper, operations, mock(RecoveryPublisher.class), properties("CREATE_PSEUDONYM"), batches,
+                mock(OutageCoordinator.class)).onMessage(poll, acknowledgment);
+
+        verify(batches, times(2)).execute(argThat(chunk -> chunk.size() == 2));
+        verify(operations, never()).execute(any(), any());
+        InOrder order = inOrder(acknowledgment);
+        order.verify(acknowledgment).acknowledge(1);
+        order.verify(acknowledgment).acknowledge(3);
+    }
+
+    /** Chunks respect the configured batch size; a leftover record forms its own chunk. */
+    @Test
+    void limitsChunksToBatchSize() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        ConnectorProperties properties = properties("CREATE_PSEUDONYM");
+        properties.setBatchSize(2);
+        when(mapper.map(any())).thenReturn(mapped());
+        when(batches.execute(anyList())).thenReturn(Set.of(0, 1), Set.of(0));
+
+        new ConnectorListener(mapper, operations, mock(RecoveryPublisher.class), properties, batches, mock(OutageCoordinator.class))
+                .onMessage(List.of(record(0, new byte[] {1}), record(1, new byte[] {2}), record(2, new byte[] {3})), acknowledgment);
+
+        verify(batches).execute(argThat(chunk -> chunk.size() == 2));
+        verify(batches).execute(argThat(chunk -> chunk.size() == 1));
+        verify(operations, never()).execute(any(), any());
+        InOrder order = inOrder(acknowledgment);
+        order.verify(acknowledgment).acknowledge(1);
+        order.verify(acknowledgment).acknowledge(2);
+    }
+
+    /** An invalid record in the middle splits the poll; the records around it are still batched. */
+    @Test
+    void invalidRecordSplitsChunks() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        RecoveryPublisher recovery = mock(RecoveryPublisher.class);
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        List<ConsumerRecord<byte[], byte[]>> poll = List.of(record(0, new byte[] {1}), record(1, new byte[] {2}),
+                record(2, new byte[] {3}), record(3, new byte[] {4}), record(4, new byte[] {5}));
+        when(mapper.map(any())).thenReturn(mapped());
+        when(mapper.map(poll.get(2).value())).thenThrow(new MappingException("invalid"));
+        when(batches.execute(anyList())).thenReturn(Set.of(0, 1));
+
+        new ConnectorListener(mapper, operations, recovery, properties("CREATE_PSEUDONYM"), batches, mock(OutageCoordinator.class))
+                .onMessage(poll, acknowledgment);
+
+        verify(batches, times(2)).execute(argThat(chunk -> chunk.size() == 2));
+        verify(recovery).publishDlt(eq(poll.get(2)), any(), eq("INVALID_MAPPING"), eq(0), any());
+        InOrder order = inOrder(acknowledgment);
+        order.verify(acknowledgment).acknowledge(1);
+        order.verify(acknowledgment).acknowledge(2);
+        order.verify(acknowledgment).acknowledge(4);
     }
 
     /** A contradicting imported pseudonym goes to the review topic, not the DLT. */
@@ -396,6 +467,10 @@ class ConnectorListenerTest {
 
     private ConsumerRecord<byte[], byte[]> record(long offset, byte[] value) {
         return new ConsumerRecord<>("source", 0, offset, new byte[] {(byte) offset}, value);
+    }
+
+    private ConsumerRecord<byte[], byte[]> record(int partition, long offset, byte[] value) {
+        return new ConsumerRecord<>("source", partition, offset, new byte[] {(byte) offset}, value);
     }
 
     private MappedMessage mapped() {

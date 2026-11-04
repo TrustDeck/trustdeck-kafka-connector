@@ -170,7 +170,8 @@ public class OutageCoordinator {
             // Keep the source paused until an authenticated read-only probe succeeds
             String description = FailureClassifier.describe(failure);
             if (!description.equals(lastProbeFailure)) {
-                log.warn("Recovery probe failed; consumption stays paused: {}", description);
+                log.warn("Recovery probe failed; consumption stays paused{}: {}",
+                        failedDomain == null ? "" : " (domain " + failedDomain + ")", description);
                 lastProbeFailure = description;
             } else {
                 log.debug("Recovery probe failed again: {}", description);

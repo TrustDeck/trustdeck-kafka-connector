@@ -167,6 +167,7 @@ public final class FailureClassifier {
 	/**
 	 * Describes a failure by the simple class names of its cause chain, for
 	 * example {@code TrustDeckClientLibraryException <- ResourceAccessException <- SocketTimeoutException}.
+	 * HTTP failures carry their status, for example {@code TrustDeckResponseException(403)}.
 	 *
 	 * Exception messages are omitted because they may contain record content or
 	 * credentials.
@@ -177,7 +178,8 @@ public final class FailureClassifier {
 	public static String describe(Throwable failure) {
 		List<String> names = new ArrayList<>();
 		for (Throwable cause : chain(failure)) {
-			names.add(cause.getClass().getSimpleName());
+			Integer status = httpStatus(cause);
+			names.add(cause.getClass().getSimpleName() + (status == null ? "" : "(" + status + ")"));
 		}
 
 		return String.join(" <- ", names);
