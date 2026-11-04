@@ -16,7 +16,7 @@ RUN apt-get update \
 ENV TZ=UTC JAVA_TOOL_OPTIONS="-Duser.timezone=UTC"
 WORKDIR /app
 COPY --from=build /build/target/trustdeck-kafka-connector-1.0.0.jar /app/app.jar
-RUN chown -R connector:connector /app
+RUN mkdir -p /app/statistics && chown -R connector:connector /app
 USER connector
 EXPOSE 8080
 ENTRYPOINT ["java", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/app.jar"]

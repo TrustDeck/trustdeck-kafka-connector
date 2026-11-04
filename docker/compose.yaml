@@ -23,5 +23,7 @@ services:
     volumes:
       - ../config/instance/application.yaml:/app/config/application.yaml:ro
       - ../config/instance/truststores:/app/truststores:ro
+      # Statistics survive container recreation; the directory must be writable by UID 10001 (connector.sh prepares it)
+      - ${STATISTICS_HOST_DIR:-../statistics}:/app/statistics
     ports:
       - "${HEALTH_HOST_PORT:-18080}:8080"
