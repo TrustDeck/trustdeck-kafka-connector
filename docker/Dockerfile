@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1.7
 FROM maven:3.9.11-eclipse-temurin-21 AS build
 WORKDIR /build
+# Uses HTTP(S)_PROXY/NO_PROXY build arguments for Maven; a maven_settings secret takes precedence
+COPY --chmod=755 docker/maven-proxy.sh /usr/local/bin/mvn-proxy
 COPY pom.xml .
-RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml,required=false mvn -B dependency:go-offline
+RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml,required=false mvn-proxy -B dependency:go-offline
 COPY src src
-RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml,required=false mvn -B clean package -DskipTests
+RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml,required=false mvn-proxy -B clean package -DskipTests
 
 FROM eclipse-temurin:21-jre-jammy
 RUN apt-get update \

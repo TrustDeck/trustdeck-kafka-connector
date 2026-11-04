@@ -115,6 +115,8 @@ Start new groups at `earliest`; existing committed offsets take precedence. Insp
   docker compose --env-file .env -p trustdeck-connector-b -f docker/compose.yaml -f docker/compose.trustdeck-network.yaml up -d
 ```
 
+Behind an HTTP proxy, export `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` (or the lowercase variants) in the shell that runs `docker compose build`. Compose passes them as build arguments; `apt-get` uses them directly, and Maven receives a temporary `settings.xml` generated from them (`docker/maven-proxy.sh`). They are not stored in the image. For a private Maven repository, pass a complete `settings.xml` instead, which takes precedence: `docker build -f docker/Dockerfile --secret id=maven_settings,src=$HOME/.m2/settings.xml -t trustdeck-kafka-connector:1.0.0 .`
+
 The base Compose file requires only an `.env`, read-only instance YAML/truststore mounts, and a free health port. The override joins an already existing external `trustdeck` network. It has no fixed container name or mandatory host port. Use HTTPS backend and Keycloak URLs, a valid `SMTP_FROM`, and finite SMTP settings. Health is exposed only at `/actuator/health/readiness` and `/actuator/health/liveness`.
 
 ## Verification and Limitations
