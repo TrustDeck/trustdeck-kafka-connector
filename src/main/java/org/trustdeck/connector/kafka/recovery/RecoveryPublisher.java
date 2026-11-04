@@ -35,6 +35,7 @@ import org.springframework.stereotype.Service;
 import org.trustdeck.client.exception.TrustDeckResponseException;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
 import org.trustdeck.connector.kafka.mapping.MappedMessage;
+import org.trustdeck.connector.kafka.operation.PseudonymConflictException;
 
 /**
  * Publishes recovery envelopes for failed, ambiguous, or review-required records.
@@ -101,6 +102,24 @@ public class RecoveryPublisher {
 	 */
 	public void publishReview(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, int attempts, Throwable failure) throws Exception {
 		publish(record, mapped, "RECORD_LINKAGE", "PENDING_LINKAGE_REVIEW", attempts, failure,
+				properties.getRecovery().getReviewTopic());
+	}
+
+	/**
+	 * Publishes an imported pseudonym that contradicts the target domain to the
+	 * configured review topic.
+	 *
+	 * The failure category names the kind of contradiction, for example
+	 * {@code PSEUDONYM_CONFLICT_IDENTIFIER_HAS_OTHER_PSEUDONYM}. Publication waits
+	 * for broker confirmation before returning.
+	 *
+	 * @param record original Kafka source record
+	 * @param mapped mapped connector message
+	 * @param conflict detected conflict
+	 * @throws Exception if serialization or broker-confirmed publication fails
+	 */
+	public void publishConflict(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, PseudonymConflictException conflict) throws Exception {
+		publish(record, mapped, "PSEUDONYM_CONFLICT_" + conflict.getReason(), "PENDING_CONFLICT_REVIEW", 1, conflict,
 				properties.getRecovery().getReviewTopic());
 	}
 
@@ -215,7 +234,13 @@ public class RecoveryPublisher {
 	 * @return HTTP status code, or {@code null} for non-HTTP failures
 	 */
 	private Integer httpStatus(Throwable failure) {
-		return failure instanceof TrustDeckResponseException e ? e.getStatusCode() : null;
+		for (Throwable cause = failure; cause != null; cause = cause.getCause() == cause ? null : cause.getCause()) {
+			if (cause instanceof TrustDeckResponseException e) {
+				return e.getStatusCode();
+			}
+		}
+
+		return null;
 	}
 
 	/**

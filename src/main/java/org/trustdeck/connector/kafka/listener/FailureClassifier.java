@@ -59,6 +59,9 @@ public final class FailureClassifier {
 	/** Category for record-local failures that persisted after the configured retries. */
 	public static final String TRANSIENT_OPERATION_FAILURE = "TRANSIENT_OPERATION_FAILURE";
 
+	/** Category for requests TrustDeck answered with a definitive client error, which a retry cannot change. */
+	public static final String REJECTED_BY_TRUSTDECK = "REJECTED_BY_TRUSTDECK";
+
 	/** Upper bound for walked causes, protecting against pathological chains. */
 	private static final int MAX_DEPTH = 32;
 
@@ -107,6 +110,27 @@ public final class FailureClassifier {
 	}
 
 	/**
+	 * Determines whether TrustDeck definitively rejected the request.
+	 *
+	 * The first HTTP status found in the cause chain decides: a 4xx status other
+	 * than 401 and 403 (systemic), 408 and 429 (transient) means the request
+	 * itself cannot succeed, so retrying it only wastes the poll interval.
+	 *
+	 * @param failure failure to classify
+	 * @return {@code true} if the request must not be retried
+	 */
+	public static boolean rejected(Throwable failure) {
+		for (Throwable cause : chain(failure)) {
+			Integer status = httpStatus(cause);
+			if (status != null) {
+				return rejectedStatus(status);
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * Converts a failure into a sanitized recovery or outage category.
 	 *
 	 * The returned category deliberately avoids exposing exception messages or
@@ -127,7 +151,8 @@ public final class FailureClassifier {
 			Integer status = httpStatus(cause);
 			if (status != null) {
 				return status == 401 || status == 403 ? AUTHORIZATION_FAILURE
-						: status >= 500 ? BACKEND_UNAVAILABLE : TRANSIENT_OPERATION_FAILURE;
+						: status >= 500 ? BACKEND_UNAVAILABLE
+						: rejectedStatus(status) ? REJECTED_BY_TRUSTDECK : TRANSIENT_OPERATION_FAILURE;
 			}
 		}
 
@@ -202,6 +227,16 @@ public final class FailureClassifier {
 	 */
 	private static boolean systemicStatus(int status) {
 		return status == 401 || status == 403 || status >= 500;
+	}
+
+	/**
+	 * Tests whether an HTTP status is a definitive client error.
+	 *
+	 * @param status HTTP status
+	 * @return {@code true} for 4xx except 401, 403, 408, and 429
+	 */
+	private static boolean rejectedStatus(int status) {
+		return status >= 400 && status < 500 && status != 401 && status != 403 && status != 408 && status != 429;
 	}
 
 	/**

@@ -76,7 +76,21 @@ class FailureClassifierTest {
         assertTrue(FailureClassifier.systemic(response(403)));
         assertEquals("AUTHORIZATION_FAILURE", FailureClassifier.category(response(403)));
         assertFalse(FailureClassifier.systemic(response(422)));
-        assertEquals("TRANSIENT_OPERATION_FAILURE", FailureClassifier.category(response(422)));
+        assertEquals("REJECTED_BY_TRUSTDECK", FailureClassifier.category(response(422)));
+    }
+
+    /** Definitive client errors are not retried; timeouts and rate limits are. */
+    @Test
+    void onlyDefinitiveClientErrorsAreRejections() {
+        assertTrue(FailureClassifier.rejected(response(422)));
+        assertTrue(FailureClassifier.rejected(response(400)));
+        assertTrue(FailureClassifier.rejected(new RuntimeException(response(404))));
+        assertFalse(FailureClassifier.rejected(response(408)));
+        assertFalse(FailureClassifier.rejected(response(429)));
+        assertEquals("TRANSIENT_OPERATION_FAILURE", FailureClassifier.category(response(429)));
+        assertFalse(FailureClassifier.rejected(response(403)));
+        assertFalse(FailureClassifier.rejected(response(503)));
+        assertFalse(FailureClassifier.rejected(new IllegalStateException("record-local")));
     }
 
     /** Spring HTTP errors nested in the library exception are classified by status. */

@@ -17,12 +17,13 @@
 
 package org.trustdeck.connector.kafka.operation;
 
-import java.util.List;
-import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
+import java.util.TreeSet;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,15 +40,17 @@ import org.trustdeck.connector.kafka.mapping.MappedMessage;
  *
  * The service validates batch compatibility and serialized request size before
  * submission. Returned pseudonyms are correlated back to their source records
- * using complete identifying fields. Partial responses are completed safely by
- * replaying only unresolved source records individually.
+ * using complete identifying fields. The caller processes every record the
+ * batch did not create individually, because TrustDeck reports duplicates and
+ * conflicts in a batch only by omitting them (206) or rejecting the whole
+ * batch (422) when nothing was created.
  *
  * @author Armin Müller
  */
 @Service
 public class PseudonymBatchService {
 
-	/** Shared TrustDeck client used for batch and fallback requests. */
+	/** Shared TrustDeck client used for batch requests. */
 	private final TrustDeckClient client;
 
 	/** Connector configuration defining batch size and wire-size limits. */
@@ -75,17 +78,17 @@ public class PseudonymBatchService {
 	 * All messages must target the same domain, contain an imported pseudonym
 	 * value, and remain within the configured record and serialized byte limits.
 	 * Returned results are correlated by identifier, identifier type, and
-	 * pseudonym value. For partial responses, unresolved records are retried
-	 * individually after all returned successes were correlated safely.
+	 * pseudonym value. A partial response (206) contains only the created
+	 * records; the remaining ones are left to the caller.
 	 *
 	 * @param messages compatible mapped source messages
-	 * @return successfully created pseudonyms
+	 * @return indexes of the messages TrustDeck confirmed as created, in ascending order
 	 * @throws IllegalArgumentException if the batch is incompatible, exceeds a configured limit, or cannot be serialized
 	 * @throws IllegalStateException if the batch response cannot be correlated safely to the submitted source records
 	 */
-	public List<Pseudonym> execute(List<MappedMessage> messages) {
+	public Set<Integer> execute(List<MappedMessage> messages) {
 		if (messages.isEmpty()) {
-			return List.of();
+			return Set.of();
 		}
 
 		String domain = messages.getFirst().domain();
@@ -131,7 +134,7 @@ public class PseudonymBatchService {
 		}
 
 		// Correlate every returned pseudonym to exactly one submitted occurrence
-		List<Pseudonym> correlated = new ArrayList<>(messages.size());
+		Set<Integer> created = new TreeSet<>();
 		for (Pseudonym returned : result.items()) {
 			if (returned == null || returned.getIdentifierItem() == null) {
 				throw new IllegalStateException("Pseudonym batch response correlation is ambiguous.");
@@ -142,8 +145,7 @@ public class PseudonymBatchService {
 				throw new IllegalStateException("Pseudonym batch response correlation is ambiguous.");
 			}
 
-			indexes.remove();
-			correlated.add(returned);
+			created.add(indexes.remove());
 		}
 
 		// A complete response must contain one safely correlated result for every input
@@ -151,21 +153,12 @@ public class PseudonymBatchService {
 			throw new IllegalStateException("Pseudonym batch response omitted an input record.");
 		}
 
-		if (result.partial()) {
-			if (correlated.isEmpty()) {
-				throw new IllegalStateException("Partial pseudonym response has no safely correlated successes.");
-			}
-
-			// Retry only source records that were not represented in the partial response
-			for (Queue<Integer> unresolved : occurrences.values()) {
-				while (!unresolved.isEmpty()) {
-					int index = unresolved.remove();
-					correlated.add(client.project(properties.getTrustdeck().getProject()).pseudonyms(domain).create(request.get(index), false));
-				}
-			}
+		// TrustDeck only answers 206 when at least one record was created
+		if (result.partial() && created.isEmpty()) {
+			throw new IllegalStateException("Partial pseudonym response has no safely correlated successes.");
 		}
 
-		return correlated;
+		return created;
 	}
 
 	/**
