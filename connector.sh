@@ -36,7 +36,7 @@ CONTAINER_UID=10001
 # Helper for printing how to use
 usage() {
   cat <<EOF
-Usage: $0 <standalone|trustdeck> <start|stop|restart|status|logs|build>
+Usage: $0 <standalone|trustdeck> <start|stop|restart|status|logs|build|progress> [options]
 
 Setups:
   standalone  - Connector only; TrustDeck and Keycloak are reached through the URLs in .env
@@ -47,9 +47,13 @@ Actions:
   start    - Build the image, (re)create the container, and wait until it is ready
   stop     - Stop and remove the container (committed Kafka offsets are kept)
   restart  - stop, then start
-  status   - Show container state and readiness
+  status   - Show container state, readiness, and the reason of the last pause
   logs     - Follow the container log
   build    - Build the image only
+  progress [since-ms] [seconds]
+           - Measure throughput over [seconds] (default 60), estimate the remaining time, and
+             count DLT/review entries since [since-ms] (default: container start).
+             Needs kcat, jq, and keytool on the host for the recovery-topic counts.
 
 Environment:
   CONNECTOR_PROJECT  Compose project name (default: trustdeck-kafka-connector)
@@ -58,6 +62,7 @@ Environment:
 Examples:
   $0 trustdeck start
   $0 trustdeck logs
+  $0 trustdeck progress "" 600
   CONNECTOR_PROJECT=connector-b $0 standalone start
 EOF
   exit 1
@@ -237,12 +242,125 @@ status() {
   port="$(env_value HEALTH_HOST_PORT 18080)"
   echo
   echo -n "Readiness (http://127.0.0.1:$port/actuator/health/readiness): "
-  curl -fsS "http://127.0.0.1:$port/actuator/health/readiness" 2>/dev/null || echo "not ready or not reachable"
+  if curl -fsS "http://127.0.0.1:$port/actuator/health/readiness" 2>/dev/null; then
+    echo
+    return 0
+  fi
+  echo "not ready or not reachable"
+
+  # A paused connector names the cause, and for TrustDeck failures the domain, when it pauses
   echo
+  echo "Last pause and recovery events:"
+  compose logs --no-log-prefix "$SERVICE" 2>/dev/null \
+    | grep -E 'pausing consumption|Recovery probe failed|consumption resumed|Consumption paused' | tail -n 5 \
+    || echo "  none found in the current container log"
 }
 
 logs() {
-  compose logs -f --since 10m "$SERVICE"
+  compose logs -f --no-log-prefix --since 10m "$SERVICE"
+}
+
+# Reads all variables from .env into the environment (progress needs the Kafka credentials)
+load_env() {
+  set -a
+  # shellcheck disable=SC1090
+  source <(sed 's/\r$//' "$ENV_FILE")
+  set +a
+}
+
+# Reads a plain value such as "dlt-topic: name" from config/instance/application.yaml; placeholders are ignored
+instance_value() {
+  sed -n "s/^[[:space:]]*$1:[[:space:]]*//p" "$ROOT_DIR/config/instance/application.yaml" \
+    | tr -d "\"'\r" | grep -v '^\$' | head -n 1 || true
+}
+
+# Sums committed offset, log end, and lag over all partitions of the source topic
+group_offsets() {
+  local props="$1"
+  local topic="$2"
+  docker_cmd run --rm --user "$(id -u):$(id -g)" -v "$props:/tmp/admin.properties:ro" \
+    -v "$ROOT_DIR/config/instance/truststores:/truststores:ro" apache/kafka:3.9.1 \
+    /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" \
+    --command-config /tmp/admin.properties --describe --group "$KAFKA_GROUP_ID" 2>/dev/null \
+  | awk -v t="$topic" '$2 == t {c += $4; e += $5; l += $6} END {printf "%d %d %d\n", c, e, l}'
+}
+
+progress() {
+  local since_ms="${1:-}"
+  local interval="${2:-60}"
+  load_env
+
+  local topic="${KAFKA_TOPIC:-}"
+  if [[ -z "$topic" ]]; then
+    echo "KAFKA_TOPIC is not set in .env."
+    exit 1
+  fi
+
+  # Default window: since the current container started
+  if [[ -z "$since_ms" ]]; then
+    local container started
+    container="$(compose ps -q "$SERVICE")"
+    started="$(docker_cmd inspect -f '{{.State.StartedAt}}' "$container" 2>/dev/null || true)"
+    since_ms="$(date -u -d "${started:-now}" +%s%3N)"
+  fi
+
+  # Temporary Kafka client configuration; contains the password and is removed on exit
+  local props
+  props="$(umask 077; mktemp /tmp/kafka-admin.XXXXXX.properties)"
+  # shellcheck disable=SC2064
+  trap "shred -u '$props' 2>/dev/null || rm -f '$props'" EXIT
+  cat > "$props" <<EOF
+security.protocol=${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+sasl.mechanism=${KAFKA_SASL_MECHANISM:-PLAIN}
+sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
+ssl.truststore.location=/truststores/$(basename "$KAFKA_TRUSTSTORE_LOCATION")
+ssl.truststore.password=${KAFKA_TRUSTSTORE_PASSWORD}
+ssl.truststore.type=${KAFKA_TRUSTSTORE_TYPE:-JKS}
+EOF
+
+  echo "=== Progress of group '$KAFKA_GROUP_ID' on '$topic' (measuring for ${interval}s) ..."
+  local c1 c2 e2 l2 t1 t2
+  read -r c1 _ _ < <(group_offsets "$props" "$topic"); t1=$(date +%s)
+  sleep "$interval"
+  read -r c2 e2 l2 < <(group_offsets "$props" "$topic"); t2=$(date +%s)
+  awk -v c1="$c1" -v c2="$c2" -v e="$e2" -v l="$l2" -v s=$((t2 - t1)) 'BEGIN {
+    if (e == 0) { print "No offsets found; is KAFKA_GROUP_ID correct?"; exit }
+    r = (c2 - c1) / s
+    printf "Processed: %d of %d (%.2f%%), remaining: %d\n", c2, e, 100 * c2 / e, l
+    printf "Rate:      %.0f records/s (%.1f million/day)\n", r, r * 86400 / 1e6
+    if (r > 0) printf "ETA:       %.1f hours (%.1f days)\n", l / r / 3600, l / r / 86400
+    else if (l > 0) print "ETA:       no progress during the measurement (paused? see status)"
+    else print "ETA:       done"
+  }'
+
+  echo
+  echo "=== Recovery topics since $(date -u -d "@$((since_ms / 1000))" '+%F %T') UTC"
+  if ! command -v kcat >/dev/null || ! command -v jq >/dev/null; then
+    echo "kcat and jq are needed for this part; skipped."
+  else
+    local ca
+    ca="$(umask 077; mktemp /tmp/kafka-ca.XXXXXX.pem)"
+    # shellcheck disable=SC2064
+    trap "shred -u '$props' 2>/dev/null || rm -f '$props'; rm -f '$ca'" EXIT
+    keytool -exportcert -rfc -keystore "$ROOT_DIR/config/instance/truststores/$(basename "$KAFKA_TRUSTSTORE_LOCATION")" \
+      -storepass "$KAFKA_TRUSTSTORE_PASSWORD" > "$ca" 2>/dev/null
+
+    local dlt review t
+    dlt="${KAFKA_DLT_TOPIC:-$(instance_value dlt-topic)}"
+    review="${KAFKA_REVIEW_TOPIC:-$(instance_value review-topic)}"
+    for t in "${dlt:-$topic.DLT}" "${review:-$topic.REVIEW}"; do
+      echo "--- $t"
+      kcat -C -b "$KAFKA_BOOTSTRAP_SERVERS" -X security.protocol="${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}" \
+        -X sasl.mechanism="${KAFKA_SASL_MECHANISM:-PLAIN}" -X sasl.username="$KAFKA_USERNAME" \
+        -X sasl.password="$KAFKA_PASSWORD" -X ssl.ca.location="$ca" \
+        -t "$t" -o "s@$since_ms" -e -q -f '%s\n' 2>/dev/null \
+      | jq -r '"\(.status)\t\(.failureCategory)\t\(.httpStatus // "-")"' | sort | uniq -c
+    done
+  fi
+
+  echo
+  echo "=== Connector"
+  status | tail -n +2
 }
 
 # --- Main script ---
@@ -266,5 +384,6 @@ case "$ACTION" in
   status)  check_files; status ;;
   logs)    check_files; logs ;;
   build)   check_files; build ;;
+  progress) check_files; progress "${3:-}" "${4:-}" ;;
   *) usage ;;
 esac

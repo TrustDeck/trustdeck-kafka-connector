@@ -1,6 +1,10 @@
 spring:
   application:
     name: trustdeck-kafka-connector
+  output:
+    # Colored log levels like the TrustDeck backend; set LOG_COLORS=never for collectors without ANSI support
+    ansi:
+      enabled: ${LOG_COLORS:always}
   main:
     # The connector exposes the guarded replay endpoint and Actuator health URLs
     # It remains Kafka-driven; no application traffic is required for processing
@@ -142,3 +146,12 @@ connector:
     output-directory: ${CONNECTOR_STATISTICS_OUTPUT_DIRECTORY:statistics}
     max-file-age: ${CONNECTOR_STATISTICS_MAX_FILE_AGE:1d}
     max-file-size: ${CONNECTOR_STATISTICS_MAX_FILE_SIZE:256MB}
+
+# Console format matches the TrustDeck backend (see logback-spring.xml). Like TrustDeck, third-party
+# libraries log only warnings; override with e.g. LOGGING_LEVEL_ROOT=INFO when debugging Kafka.
+logging:
+  level:
+    root: ${LOGGING_LEVEL_ROOT:WARN}
+    org.trustdeck: ${LOGGING_LEVEL_ORG_TRUSTDECK:INFO}
+    # Partition assignment and revocation stay visible
+    org.springframework.kafka.listener.KafkaMessageListenerContainer: INFO

@@ -110,7 +110,7 @@ Production outage handling must pause consumption rather than drain records to D
 
 Start new groups at `earliest`; existing committed offsets take precedence. Inspect and reset offsets only with the consumer stopped, and never reset the production group during development. Conservative defaults are concurrency 2, 100 poll records, 100-record/256 KiB batch limits, 5-second connect timeout, 30-second read timeout, and three retries. Tune `max.poll.interval.ms` above the worst sequential HTTP and retry budget, or lower poll size. Instances sharing a group divide partitions; independent mappings or operations require distinct groups or they will double-process or omit work.
 
-`connector.sh` wraps the Compose calls. `standalone` uses only the base file, `trustdeck` adds the overlay that joins the external `trustdeck` network, so `.env` can address `trustdeck-backend` and `trustdeck-keycloak` by container name. `start` checks `.env` and the instance files, prepares the statistics directory, builds the image, recreates the container, and waits for readiness; `stop`, `restart`, `status`, `logs`, and `build` do what they say. Set `CONNECTOR_PROJECT` to run several instances side by side (default project: `trustdeck-kafka-connector`). A container left over from the former implicit project name `docker` is stopped and removed on start.
+`connector.sh` wraps the Compose calls. `standalone` uses only the base file, `trustdeck` adds the overlay that joins the external `trustdeck` network, so `.env` can address `trustdeck-backend` and `trustdeck-keycloak` by container name. `start` checks `.env` and the instance files, prepares the statistics directory, builds the image, recreates the container, and waits for readiness; `stop`, `restart`, `logs`, and `build` do what they say. `status` also prints the last pause and recovery events, which name the cause and, for TrustDeck failures, the domain. `progress [since-ms] [seconds]` measures throughput, estimates the remaining time from the consumer lag, and counts DLT and review entries (needs `kcat`, `jq`, and `keytool` on the host for the counts). Set `CONNECTOR_PROJECT` to run several instances side by side (default project: `trustdeck-kafka-connector`). A container left over from the former implicit project name `docker` is stopped and removed on start.
 
 ```sh
   ./connector.sh trustdeck start
@@ -124,6 +124,8 @@ The equivalent plain Compose calls are:
   docker compose --env-file .env -p trustdeck-connector-a -f docker/compose.yaml up -d
   docker compose --env-file .env -p trustdeck-connector-b -f docker/compose.yaml -f docker/compose.trustdeck-network.yaml up -d
 ```
+
+The console log uses the TrustDeck backend format (`[LEVEL]<tab>yyyy-MM-dd HH:mm:ss,SSS Class:line message`, see `logback-spring.xml`). Third-party libraries log warnings only; set `LOGGING_LEVEL_ROOT=INFO` to see Kafka client details, and `LOG_COLORS=never` for log collectors without ANSI support. A statistics sample that keeps failing is logged at WARN once and then at DEBUG.
 
 Statistics files are written to `/app/statistics`, which is mounted from `STATISTICS_HOST_DIR` (default `statistics/` in the repository root) so they survive container recreation. The directory must be writable by UID 10001; `connector.sh` creates it and hands it over, otherwise Docker would create it owned by root.
 

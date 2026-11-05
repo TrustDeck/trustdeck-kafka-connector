@@ -94,6 +94,9 @@ public class ConnectorStatistics {
 	/** Prevents sampling tasks from writing after shutdown finalization begins. */
 	private volatile boolean stopping;
 
+	/** Cause chain of the last failed sample, so a lasting failure is logged at WARN only once. */
+	private volatile String lastSampleFailure;
+
 	/**
 	 * Creates the statistics collector using the system UTC clock.
 	 *
@@ -258,8 +261,21 @@ public class ConnectorStatistics {
 				project = client.project(projectName).getStatistics();
 			}
 			system = client.system().getStatistics();
+
+			if (lastSampleFailure != null) {
+				log.info("TrustDeck connector statistics are available again.");
+				lastSampleFailure = null;
+			}
 		} catch (Exception exception) {
-			log.warn("Unable to collect TrustDeck connector statistics sample: {}", FailureClassifier.describe(exception));
+			// Statistics are optional: report a lasting failure once instead of on every sample
+			String description = FailureClassifier.describe(exception);
+			if (!description.equals(lastSampleFailure)) {
+				log.warn("Unable to collect TrustDeck connector statistics sample (repeats are logged at DEBUG): {}", description);
+				lastSampleFailure = description;
+			} else {
+				log.debug("Unable to collect TrustDeck connector statistics sample: {}", description);
+			}
+
 			project = null;
 			system = null;
 			error = exception.getClass().getSimpleName() + ": " + exception.getMessage();
