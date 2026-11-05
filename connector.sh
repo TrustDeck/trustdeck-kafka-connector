@@ -274,6 +274,18 @@ instance_value() {
     | tr -d "\"'\r" | grep -v '^\$' | head -n 1 || true
 }
 
+# Writes every trusted certificate of a JKS/PKCS12 truststore as PEM (kcat cannot read Java truststores).
+# keytool exports a single alias only, so all aliases are listed first.
+export_ca_certificates() {
+  local truststore="$1"
+  local alias
+  keytool -list -keystore "$truststore" -storepass "$KAFKA_TRUSTSTORE_PASSWORD" 2>/dev/null \
+    | awk -F', ' '/trustedCertEntry/ {print $1}' \
+    | while IFS= read -r alias; do
+        keytool -exportcert -rfc -alias "$alias" -keystore "$truststore" -storepass "$KAFKA_TRUSTSTORE_PASSWORD" 2>/dev/null
+      done
+}
+
 # Sums committed offset, log end, and lag over all partitions of the source topic
 group_offsets() {
   local props="$1"
@@ -342,8 +354,11 @@ EOF
     ca="$(umask 077; mktemp /tmp/kafka-ca.XXXXXX.pem)"
     # shellcheck disable=SC2064
     trap "shred -u '$props' 2>/dev/null || rm -f '$props'; rm -f '$ca'" EXIT
-    keytool -exportcert -rfc -keystore "$ROOT_DIR/config/instance/truststores/$(basename "$KAFKA_TRUSTSTORE_LOCATION")" \
-      -storepass "$KAFKA_TRUSTSTORE_PASSWORD" > "$ca" 2>/dev/null
+    export_ca_certificates "$ROOT_DIR/config/instance/truststores/$(basename "$KAFKA_TRUSTSTORE_LOCATION")" > "$ca"
+    if [[ ! -s "$ca" ]]; then
+      echo "Could not export any certificate from the Kafka truststore; check KAFKA_TRUSTSTORE_LOCATION and its password."
+      exit 1
+    fi
 
     local dlt review t
     dlt="${KAFKA_DLT_TOPIC:-$(instance_value dlt-topic)}"
