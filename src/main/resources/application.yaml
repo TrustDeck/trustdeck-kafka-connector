@@ -18,7 +18,8 @@ spring:
       max-poll-records: ${KAFKA_MAX_POLL_RECORDS:100}
       max-partition-fetch-bytes: ${KAFKA_MAX_PARTITION_FETCH_BYTES:1048576}
       properties:
-        # Must exceed the worst sequential HTTP and retry budget
+        # Must be at least connector.recovery.batch-time-budget + 2 x (connect-timeout + read-timeout);
+        # startup fails otherwise. With the defaults: 120s + 2 x (5s + 30s) = 190s <= 300s
         max.poll.interval.ms: ${KAFKA_MAX_POLL_INTERVAL_MS:300000}
     producer:
       # Recovery records are not considered committed until the broker confirms them
@@ -131,6 +132,9 @@ connector:
     max-attempts: ${RECOVERY_MAX_ATTEMPTS:3}
     initial-backoff: ${RECOVERY_INITIAL_BACKOFF:1s}
     probe-interval: ${RECOVERY_PROBE_INTERVAL:15s}
+    # No further record or retry is started in a poll after this time; the rest is redelivered by the next poll.
+    # Keeps slow batches inside max.poll.interval.ms so the consumer is not evicted from its group
+    batch-time-budget: ${RECOVERY_BATCH_TIME_BUDGET:120s}
   statistics:
     # Disabled by default because each sample makes authenticated backend requests
     enabled: ${CONNECTOR_STATISTICS_ENABLED:false}

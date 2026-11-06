@@ -17,11 +17,13 @@
 
 package org.trustdeck.connector.kafka.config;
 
+import java.time.Duration;
 import java.util.Map;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -34,6 +36,8 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties.AckMode;
+import org.trustdeck.connector.kafka.health.OutageCoordinator;
+import org.trustdeck.connector.kafka.listener.ListenerErrorHandler;
 
 /**
  * Configures the Kafka consumer, listener container, producer, and template used
@@ -61,13 +65,16 @@ public class KafkaConfiguration {
 	 *
 	 * @param kafkaProperties Spring Kafka consumer settings
 	 * @param environment environment values used for optional JAAS credentials
+	 * @param properties connector settings used to validate the poll interval
 	 * @return configured source consumer factory
 	 */
     @Bean
-    public ConsumerFactory<byte[], byte[]> consumerFactory(KafkaProperties kafkaProperties, Environment environment) {
+    public ConsumerFactory<byte[], byte[]> consumerFactory(KafkaProperties kafkaProperties, Environment environment,
+    				ConnectorProperties properties) {
         Map<String, Object> settings = kafkaProperties.buildConsumerProperties();
         settings.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
-        
+
+        validatePollInterval(settings, properties);
         addJaasCredentials(settings, environment);
         
         return new DefaultKafkaConsumerFactory<>(settings, new ByteArrayDeserializer(), new ByteArrayDeserializer());
@@ -80,22 +87,29 @@ public class KafkaConfiguration {
 	 * delivery, immediate manual acknowledgements, and fails startup when the
 	 * configured source topic does not exist.
 	 *
+	 * The listener handles systemic failures itself through {@code nack}. Any
+	 * other exception that escapes it is handled by {@link ListenerErrorHandler},
+	 * which never retries or discards a batch, unlike Spring's default handler.
+	 *
 	 * @param consumerFactory source consumer factory
 	 * @param properties connector settings controlling consumer concurrency
 	 * @param autoStartup whether listeners start automatically with the application
+	 * @param outage lazily resolved outage coordinator used by the error handler
 	 * @return configured Kafka listener container factory
 	 */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<byte[], byte[]> kafkaListenerContainerFactory(
             ConsumerFactory<byte[], byte[]> consumerFactory, ConnectorProperties properties,
-            @Value("${spring.kafka.listener.auto-startup:true}") boolean autoStartup) {
-    	
+            @Value("${spring.kafka.listener.auto-startup:true}") boolean autoStartup,
+            ObjectProvider<OutageCoordinator> outage) {
+
         ConcurrentKafkaListenerContainerFactory<byte[], byte[]> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setConcurrency(properties.getConcurrency());
         factory.getContainerProperties().setAckMode(AckMode.MANUAL_IMMEDIATE);
         factory.getContainerProperties().setMissingTopicsFatal(true);
         factory.setBatchListener(true);
+        factory.setCommonErrorHandler(new ListenerErrorHandler(outage));
         factory.setAutoStartup(autoStartup);
         
         return factory;
@@ -150,6 +164,33 @@ public class KafkaConfiguration {
         if (configured.isBlank() && !username.isBlank() && !password.isBlank()) {
             settings.put("sasl.jaas.config", "org.apache.kafka.common.security.plain.PlainLoginModule required "
                     + "username=\"" + escape(username) + "\" password=\"" + escape(password) + "\";");
+        }
+    }
+
+    /**
+	 * Verifies that {@code max.poll.interval.ms} covers the batch time budget plus
+	 * one in-flight attempt.
+	 *
+	 * After the budget expires, the listener starts no new record or retry, but the
+	 * attempt in progress still has to finish. One attempt is assumed to need at
+	 * most two sequential HTTP calls (token refresh and operation), each bounded by
+	 * the connect and read timeouts. If the poll interval is shorter, a slow batch
+	 * makes the consumer miss its poll deadline and triggers a rebalance.
+	 *
+	 * @param settings consumer settings
+	 * @param properties connector settings
+	 * @throws IllegalArgumentException if the poll interval is too short
+	 */
+    static void validatePollInterval(Map<String, Object> settings, ConnectorProperties properties) {
+        Object configured = settings.get(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG);
+        Duration pollInterval = Duration.ofMillis(configured == null ? 300_000L : Long.parseLong(configured.toString().trim()));
+        Duration inFlight = properties.getConnectTimeout().plus(properties.getReadTimeout()).multipliedBy(2);
+        Duration required = properties.getRecovery().getBatchTimeBudget().plus(inFlight);
+
+        if (pollInterval.compareTo(required) < 0) {
+            throw new IllegalArgumentException("max.poll.interval.ms (" + pollInterval.toMillis()
+                    + ") must be at least recovery.batch-time-budget + 2 x (connect-timeout + read-timeout) = "
+                    + required.toMillis() + " ms.");
         }
     }
 

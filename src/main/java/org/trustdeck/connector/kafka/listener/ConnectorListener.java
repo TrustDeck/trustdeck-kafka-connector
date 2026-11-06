@@ -17,9 +17,6 @@
 
 package org.trustdeck.connector.kafka.listener;
 
-import java.io.IOException;
-import java.net.ConnectException;
-import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
@@ -28,11 +25,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
 
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.common.KafkaException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
@@ -59,8 +54,16 @@ import org.trustdeck.connector.kafka.trustdeck.TrustDeckPreflight;
  * failures. Source offsets are acknowledged only after successful processing or
  * confirmed recovery publication.
  *
+ * Systemic failures and exhausted batch time budgets do not throw. Instead the
+ * listener negatively acknowledges the first unprocessed record: Spring Kafka
+ * commits the records before it and seeks the remaining partitions back, so they
+ * are redelivered by a later poll. The consumer keeps polling (paused, if an
+ * outage was detected), which keeps it inside {@code max.poll.interval.ms} and
+ * in its consumer group.
+ *
  * @author Armin Müller
  */
+@Slf4j
 @Component
 public class ConnectorListener {
 
@@ -98,7 +101,7 @@ public class ConnectorListener {
 	 * @param batches pseudonym batch coordinator
 	 * @param outage systemic failure coordinator
 	 */
-    public ConnectorListener(JsonMessageMapper mapper, OperationService operations, RecoveryPublisher recovery, 
+    public ConnectorListener(JsonMessageMapper mapper, OperationService operations, RecoveryPublisher recovery,
     				ConnectorProperties properties, PseudonymBatchService batches, OutageCoordinator outage) {
         this(mapper, operations, recovery, properties, batches, outage, null, null);
     }
@@ -115,8 +118,8 @@ public class ConnectorListener {
 	 * @param outage systemic failure coordinator
 	 * @param preflight authenticated TrustDeck resource preflight
 	 */
-    public ConnectorListener(JsonMessageMapper mapper, OperationService operations, RecoveryPublisher recovery, 
-    				ConnectorProperties properties, PseudonymBatchService batches, OutageCoordinator outage, 
+    public ConnectorListener(JsonMessageMapper mapper, OperationService operations, RecoveryPublisher recovery,
+    				ConnectorProperties properties, PseudonymBatchService batches, OutageCoordinator outage,
     				TrustDeckPreflight preflight) {
         this(mapper, operations, recovery, properties, batches, outage, preflight, null);
     }
@@ -135,8 +138,8 @@ public class ConnectorListener {
 	 * @param statistics optional statistics collector
 	 */
     @Autowired
-    public ConnectorListener(JsonMessageMapper mapper, OperationService operations, RecoveryPublisher recovery, 
-    				ConnectorProperties properties, PseudonymBatchService batches, OutageCoordinator outage, 
+    public ConnectorListener(JsonMessageMapper mapper, OperationService operations, RecoveryPublisher recovery,
+    				ConnectorProperties properties, PseudonymBatchService batches, OutageCoordinator outage,
     				TrustDeckPreflight preflight, ConnectorStatistics statistics) {
         this.mapper = mapper;
         this.operations = operations;
@@ -156,81 +159,131 @@ public class ConnectorListener {
 	 * Offsets are acknowledged only after successful processing or confirmed
 	 * publication to the appropriate recovery topic.
 	 *
+	 * When a systemic failure pauses consumption, or the batch time budget is
+	 * exhausted, the first unprocessed record is negatively acknowledged so it and
+	 * all later records are redelivered.
+	 *
 	 * @param records source records from one Kafka poll
 	 * @param acknowledgment manual batch acknowledgment
-	 * @throws Exception if processing must remain unacknowledged, including when recovery publication fails or a systemic outage is detected
+	 * @throws InterruptedException if a retry delay is interrupted, typically during shutdown
 	 */
     @KafkaListener(topics = "${connector.source-topic}", groupId = "${connector.group-id}")
-    public void onMessage(List<ConsumerRecord<byte[], byte[]>> records, Acknowledgment acknowledgment) throws Exception {
+    public void onMessage(List<ConsumerRecord<byte[], byte[]>> records, Acknowledgment acknowledgment) throws InterruptedException {
         long started = System.nanoTime();
-        
+        long deadline = started + properties.getRecovery().getBatchTimeBudget().toNanos();
+
         try {
-			List<MappedMessage> mapped = new ArrayList<>();
-			
-			// Map all source records first while preserving their original batch positions
-			for (int index = 0; index < records.size(); index++) {
-				ConsumerRecord<byte[], byte[]> record = records.get(index);
-				
-				// Invalid or unmappable records are sent to the DLT and represented by null
-				if (record.value() == null || record.value().length > properties.getMaxRecordBytes()) {
-					publishDlt(record, null, "INVALID_RECORD", 0, new MappingException("Kafka value is null or exceeds the configured size."));
-					mapped.add(null);
-				} else {
-					try {
-						mapped.add(mapper.map(record.value()));
-					} catch (MappingException exception) {
-						publishDlt(record, null, "INVALID_MAPPING", 0, exception);
-						mapped.add(null);
-					}
-				}
-			}
-			
-			// Process eligible pseudonym-create polls as one correlated TrustDeck batch
-			if (properties.getOperation().equals("CREATE_PSEUDONYM") && safeBatch(records, mapped)) {
-				try {
-					verifyTargets(mapped);
-					batches.execute(mapped);
-				} catch (Exception failure) {
-					if (systemic(failure)) {
-						outage.pause(category(failure), failedDomain(mapped), failedEntityType(mapped), properties.getTrustdeck().getProject());
-						throw failure;
-					}
-					
-					boolean unknown = failure instanceof IllegalStateException;
-					
-					// Publish and acknowledge each source record according to the batch failure outcome
-					for (int index = 0; index < records.size(); index++) {
-						if (unknown) {
-							publishUnknown(records.get(index), mapped.get(index), failure,
-									operations.completedUuid(correlation(records.get(index))));
-						} else {
-							publishDlt(records.get(index), mapped.get(index), category(failure), 0, failure);
-						}
-						acknowledgment.acknowledge(index);
-					}
-					
-					return;
-				}
-				
-				acknowledgment.acknowledge();
-				return;
-			}
-			
-			// Process remaining records individually while skipping entries already sent to the DLT
-			for (int index = 0; index < records.size(); index++) {
-				if (mapped.get(index) == null) {
-					acknowledgment.acknowledge(index);
-					continue;
-				}
-				
-				processOne(records.get(index), mapped.get(index), acknowledgment, index);
-			}
+			process(records, acknowledgment, deadline);
+		} catch (Redeliver redeliver) {
+			log.warn("Redelivering {} of {} record(s) starting at {}: {}", records.size() - redeliver.index, records.size(),
+					correlation(records.get(redeliver.index)), redeliver.getMessage());
+			acknowledgment.nack(redeliver.index, Duration.ZERO);
 		} finally {
 			// Record batch timing even when processing exits early or fails
 			if (statistics != null) {
 				statistics.recordBatch(records.size(), System.nanoTime() - started);
 			}
 		}
+    }
+
+    /**
+	 * Maps and processes one batch.
+	 *
+	 * @param records source records from one Kafka poll
+	 * @param acknowledgment manual batch acknowledgment
+	 * @param deadline {@link System#nanoTime()} value after which no further record or retry is started
+	 * @throws Redeliver if processing must stop and the remaining records must be redelivered
+	 * @throws InterruptedException if a retry delay is interrupted
+	 */
+    private void process(List<ConsumerRecord<byte[], byte[]>> records, Acknowledgment acknowledgment, long deadline)
+    				throws Redeliver, InterruptedException {
+		List<MappedMessage> mapped = new ArrayList<>();
+		List<MappingException> invalid = new ArrayList<>();
+		List<String> invalidCategory = new ArrayList<>();
+
+		// Map all source records first while preserving their original batch positions
+		for (ConsumerRecord<byte[], byte[]> record : records) {
+			MappedMessage message = null;
+			MappingException failure = null;
+			String category = null;
+
+			if (record.value() == null || record.value().length > properties.getMaxRecordBytes()) {
+				failure = new MappingException("Kafka value is null or exceeds the configured size.");
+				category = "INVALID_RECORD";
+			} else {
+				try {
+					message = mapper.map(record.value());
+				} catch (MappingException exception) {
+					failure = exception;
+					category = "INVALID_MAPPING";
+				}
+			}
+
+			mapped.add(message);
+			invalid.add(failure);
+			invalidCategory.add(category);
+		}
+
+		// Process eligible pseudonym-create polls as one correlated TrustDeck batch
+		if (properties.getOperation().equals("CREATE_PSEUDONYM") && safeBatch(records, mapped)) {
+			processBatch(records, mapped, acknowledgment);
+			return;
+		}
+
+		// Process records individually; invalid records are published to the DLT in input order
+		for (int index = 0; index < records.size(); index++) {
+			if (mapped.get(index) == null) {
+				// Invalid records were not published during mapping, so a budget stop cannot duplicate DLT entries
+				publishDlt(records.get(index), null, invalidCategory.get(index), 0, invalid.get(index), index);
+				acknowledgment.acknowledge(index);
+				continue;
+			}
+
+			// Leave remaining work to the next poll instead of risking max.poll.interval.ms
+			if (index > 0 && System.nanoTime() >= deadline) {
+				throw new Redeliver(index, "batch time budget exhausted");
+			}
+
+			processOne(records.get(index), mapped.get(index), acknowledgment, index, deadline);
+		}
+    }
+
+    /**
+	 * Processes a safe pseudonym-create batch as one TrustDeck request.
+	 *
+	 * @param records source records from one Kafka poll
+	 * @param mapped corresponding mapped messages, none of them {@code null}
+	 * @param acknowledgment manual batch acknowledgment
+	 * @throws Redeliver if a systemic failure paused consumption or recovery publication failed
+	 */
+    private void processBatch(List<ConsumerRecord<byte[], byte[]>> records, List<MappedMessage> mapped,
+    				Acknowledgment acknowledgment) throws Redeliver {
+		try {
+			verifyTargets(mapped);
+			batches.execute(mapped);
+		} catch (Exception failure) {
+			if (FailureClassifier.systemic(failure)) {
+				pause(failure, failedDomain(mapped), failedEntityType(mapped));
+				throw new Redeliver(0, failure);
+			}
+
+			boolean unknown = failure instanceof IllegalStateException;
+
+			// Publish and acknowledge each source record according to the batch failure outcome
+			for (int index = 0; index < records.size(); index++) {
+				if (unknown) {
+					publishUnknown(records.get(index), mapped.get(index), failure,
+							operations.completedUuid(correlation(records.get(index))), index);
+				} else {
+					publishDlt(records.get(index), mapped.get(index), FailureClassifier.category(failure), 0, failure, index);
+				}
+				acknowledgment.acknowledge(index);
+			}
+
+			return;
+		}
+
+		acknowledgment.acknowledge();
     }
 
     /**
@@ -243,23 +296,26 @@ public class ConnectorListener {
 	 * @param mapped mapped connector message
 	 * @param acknowledgment batch acknowledgment
 	 * @param index index of the record within the current batch
-	 * @throws Exception if recovery publication fails or processing must be paused
+	 * @param deadline batch deadline as a {@link System#nanoTime()} value
+	 * @throws Redeliver if processing must stop at this record
+	 * @throws InterruptedException if a retry delay is interrupted
 	 */
-    private void processOne(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, Acknowledgment acknowledgment, int index) throws Exception {
+    private void processOne(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, Acknowledgment acknowledgment,
+    				int index, long deadline) throws Redeliver, InterruptedException {
         try {
             verifyTargets(List.of(mapped));
             operations.execute(mapped, correlation(record));
-            
+
             // Future result publishing belongs here, with the source correlation and returned object.
             acknowledgment.acknowledge(index);
         } catch (RecordLinkageConflictException exception) {
-            publishReview(record, mapped, 1, exception);
+            publishReview(record, mapped, 1, exception, index);
             acknowledgment.acknowledge(index);
         } catch (MappingException | IllegalArgumentException exception) {
-            publishDlt(record, mapped, "INVALID_MAPPING", 0, exception);
+            publishDlt(record, mapped, "INVALID_MAPPING", 0, exception, index);
             acknowledgment.acknowledge(index);
         } catch (Exception exception) {
-            retryOrDlt(record, mapped, exception, acknowledgment, index);
+            retryOrDlt(record, mapped, exception, acknowledgment, index, deadline);
         }
     }
 
@@ -276,18 +332,18 @@ public class ConnectorListener {
         if (preflight == null) {
             return;
         }
-        
+
         for (MappedMessage message : mapped) {
             if (message == null) {
                 continue;
             }
-            
+
             String operation = properties.getOperation();
             if (operation.equals("CREATE_PSEUDONYM") || operation.equals("UPDATE_PSEUDONYM")
                     || operation.equals("DELETE_PSEUDONYM") || operation.equals("CREATE_ENTITY_AND_PSEUDONYM")) {
                 preflight.verifyDomain(message.domain());
             }
-            
+
             if (operation.equals("CREATE_ENTITY") || operation.equals("UPDATE_ENTITY")
                     || operation.equals("DELETE_ENTITY") || operation.equals("CREATE_ENTITY_AND_PSEUDONYM")) {
                 preflight.verifyEntityType(properties.getTrustdeck().getProject(), message.entityType());
@@ -310,11 +366,11 @@ public class ConnectorListener {
         if (records.isEmpty() || mappedMessages.stream().anyMatch(Objects::isNull)) {
             return false;
         }
-        
+
         int partition = records.getFirst().partition();
         MappedMessage first = mappedMessages.getFirst();
         String domain = first.domain();
-        
+
         return records.stream().allMatch(record -> record.partition() == partition)
                 && mappedMessages.stream().allMatch(message -> domain.equals(message.domain()) && message.psn() != null
                         && Objects.equals(first.validityTime(), message.validityTime())
@@ -328,28 +384,37 @@ public class ConnectorListener {
 	 *
 	 * Systemic failures stop retry processing immediately and pause source
 	 * consumption. A successfully retried or successfully dead-lettered record is
-	 * acknowledged individually.
+	 * acknowledged individually. If the next retry would start after the batch
+	 * deadline, the record is redelivered by a later poll instead; the first record
+	 * of a batch is exempt so every poll makes progress.
 	 *
 	 * @param record original Kafka source record
 	 * @param mapped mapped connector message
 	 * @param failure initial operation failure
 	 * @param acknowledgment batch acknowledgment
 	 * @param index index of the record within the current batch
-	 * @throws Exception if a systemic failure occurs, retry processing is interrupted, or DLT publication cannot be confirmed
+	 * @param deadline batch deadline as a {@link System#nanoTime()} value
+	 * @throws Redeliver if a systemic failure occurs, the batch deadline is reached, or DLT publication cannot be confirmed
+	 * @throws InterruptedException if a retry delay is interrupted
 	 */
-    private void retryOrDlt(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, Exception failure, 
-    				Acknowledgment acknowledgment, int index) throws Exception {
-        
-    	if (systemic(failure)) {
-            outage.pause(category(failure), mapped.domain(), mapped.entityType(), properties.getTrustdeck().getProject());
-            throw failure;
+    private void retryOrDlt(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, Exception failure,
+    				Acknowledgment acknowledgment, int index, long deadline) throws Redeliver, InterruptedException {
+
+    	if (FailureClassifier.systemic(failure)) {
+            pause(failure, mapped.domain(), mapped.entityType());
+            throw new Redeliver(index, failure);
         }
-        
+
     	// Attempt to redo the operation
     	int attempts = properties.getRecovery().getMaxAttempts();
         for (int attempt = 1; attempt <= attempts; attempt++) {
+            long delay = retryDelay(failure, attempt);
+            if (index > 0 && System.nanoTime() + Duration.ofMillis(delay).toNanos() >= deadline) {
+                throw new Redeliver(index, "batch time budget exhausted during retries");
+            }
+
             try {
-                Thread.sleep(retryDelay(failure, attempt));
+                Thread.sleep(delay);
                 operations.execute(mapped, correlation(record));
                 acknowledgment.acknowledge(index);
                 return;
@@ -359,16 +424,16 @@ public class ConnectorListener {
             } catch (Exception retryFailure) {
                 // Failed again
             	failure = retryFailure;
-                
-                if (systemic(retryFailure)) {
-                    outage.pause(category(retryFailure), mapped.domain(), mapped.entityType(), properties.getTrustdeck().getProject());
-                    throw retryFailure;
+
+                if (FailureClassifier.systemic(retryFailure)) {
+                    pause(retryFailure, mapped.domain(), mapped.entityType());
+                    throw new Redeliver(index, retryFailure);
                 }
             }
         }
-        
+
         // After the configured amount of retries, the operation was still unsuccessful --> push the message to the DLT
-        publishDlt(record, mapped, category(failure), attempts, failure);
+        publishDlt(record, mapped, FailureClassifier.category(failure), attempts, failure, index);
         acknowledgment.acknowledge(index);
     }
 
@@ -390,7 +455,7 @@ public class ConnectorListener {
                 return retryAfter;
             }
         }
-        
+
         return Math.min(Duration.ofSeconds(30).toMillis(), properties.getRecovery().getInitialBackoff().toMillis() * (1L << Math.min(attempt - 1, 5)));
     }
 
@@ -407,19 +472,19 @@ public class ConnectorListener {
         if (value == null || value.isBlank()) {
             return null;
         }
-        
+
         String header = value.trim();
         try {
             long seconds = Long.parseLong(header);
             if (seconds < 0) {
                 return null;
             }
-            
+
             return seconds >= 30 ? Duration.ofSeconds(30).toMillis() : seconds * 1000L;
         } catch (NumberFormatException ignored) {
             try {
                 long millis = Duration.between(Instant.now(), ZonedDateTime.parse(header, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()).toMillis();
-                
+
                 return Math.max(0, Math.min(Duration.ofSeconds(30).toMillis(), millis));
             } catch (RuntimeException invalidHeader) {
                 return null;
@@ -428,56 +493,15 @@ public class ConnectorListener {
     }
 
     /**
-	 * Determines whether a failure represents a systemic infrastructure,
-	 * authentication, or backend problem.
+	 * Pauses source consumption because of a systemic failure.
 	 *
-	 * Systemic failures must pause source consumption rather than allowing the
-	 * affected records to be drained into recovery topics.
-	 *
-	 * @param failure failure to classify
-	 * @return {@code true} if source consumption should be paused, otherwise {@code false}
+	 * @param failure systemic failure
+	 * @param domain failed dynamic domain, or {@code null}
+	 * @param entityType failed dynamic entity type, or {@code null}
 	 */
-    private boolean systemic(Exception failure) {
-        if (failure instanceof TrustDeckResponseException response) {
-            return response.getStatusCode() == 401 || response.getStatusCode() == 403 || response.getStatusCode() >= 500;
-        }
-        
-        return failure instanceof KafkaException
-                || failure instanceof TimeoutException
-                || failure instanceof ExecutionException
-                || failure instanceof ConnectException
-                || failure instanceof SocketTimeoutException
-                || failure instanceof IOException
-                || failure.getCause() instanceof IOException
-                || failure.getCause() instanceof KafkaException
-                || failure.getCause() instanceof TimeoutException;
-    }
-
-    /**
-	 * Converts an operation or infrastructure failure into a safe recovery category.
-	 *
-	 * The returned category deliberately avoids exposing exception messages or
-	 * other potentially sensitive diagnostic information.
-	 *
-	 * @param failure failure to categorize
-	 * @return recovery category for the failure
-	 */
-    private String category(Exception failure) {
-        if (failure instanceof TrustDeckResponseException response) {
-            return response.getStatusCode() == 401 || response.getStatusCode() == 403
-                    ? "AUTHORIZATION_FAILURE" : response.getStatusCode() >= 500
-                    ? "BACKEND_UNAVAILABLE" : "TRANSIENT_OPERATION_FAILURE";
-        }
-        
-        if (failure instanceof KafkaException
-                || failure instanceof TimeoutException
-                || failure instanceof ExecutionException
-                || failure.getCause() instanceof KafkaException
-                || failure.getCause() instanceof TimeoutException) {
-            return "RECOVERY_PRODUCER_UNAVAILABLE";
-        }
-        
-        return systemic(failure) ? "BACKEND_UNAVAILABLE" : "TRANSIENT_OPERATION_FAILURE";
+    private void pause(Throwable failure, String domain, String entityType) {
+        log.warn("Systemic failure, pausing consumption: {}", FailureClassifier.describe(failure));
+        outage.pause(FailureClassifier.category(failure), domain, entityType, properties.getTrustdeck().getProject());
     }
 
     /**
@@ -491,15 +515,15 @@ public class ConnectorListener {
 	 * @param category sanitized recovery category
 	 * @param attempts number of completed retry attempts
 	 * @param failure failure that caused recovery publication
-	 * @throws Exception if dead-letter publication cannot be confirmed
+	 * @param index index of the record within the current batch
+	 * @throws Redeliver if dead-letter publication cannot be confirmed
 	 */
-    private void publishDlt(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, String category, int attempts, 
-    				Throwable failure) throws Exception {
+    private void publishDlt(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, String category, int attempts,
+    				Throwable failure, int index) throws Redeliver {
         try {
             recovery.publishDlt(record, mapped, category, attempts, failure);
         } catch (Exception publicationFailure) {
-            outage.pause("RECOVERY_PRODUCER_UNAVAILABLE");
-            throw publicationFailure;
+            throw recoveryUnavailable(index, publicationFailure);
         }
     }
 
@@ -513,14 +537,15 @@ public class ConnectorListener {
 	 * @param mapped mapped connector message
 	 * @param attempts number of completed processing attempts
 	 * @param failure linkage conflict that caused review publication
-	 * @throws Exception if review publication cannot be confirmed
+	 * @param index index of the record within the current batch
+	 * @throws Redeliver if review publication cannot be confirmed
 	 */
-    private void publishReview(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, int attempts, Throwable failure) throws Exception {
+    private void publishReview(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, int attempts, Throwable failure,
+    				int index) throws Redeliver {
         try {
             recovery.publishReview(record, mapped, attempts, failure);
         } catch (Exception publicationFailure) {
-            outage.pause("RECOVERY_PRODUCER_UNAVAILABLE");
-            throw publicationFailure;
+            throw recoveryUnavailable(index, publicationFailure);
         }
     }
 
@@ -535,16 +560,30 @@ public class ConnectorListener {
 	 * @param mapped mapped connector message
 	 * @param failure failure that left the operation outcome uncertain
 	 * @param completedUuid completed TrustDeck object UUID, if known
-	 * @throws Exception if recovery publication cannot be confirmed
+	 * @param index index of the record within the current batch
+	 * @throws Redeliver if recovery publication cannot be confirmed
 	 */
-    private void publishUnknown(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, Throwable failure, 
-    				UUID completedUuid) throws Exception {
+    private void publishUnknown(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, Throwable failure,
+    				UUID completedUuid, int index) throws Redeliver {
         try {
             recovery.publishUnknown(record, mapped, failure, completedUuid);
         } catch (Exception publicationFailure) {
-            outage.pause("RECOVERY_PRODUCER_UNAVAILABLE");
-            throw publicationFailure;
+            throw recoveryUnavailable(index, publicationFailure);
         }
+    }
+
+    /**
+	 * Pauses consumption because the recovery producer is unavailable.
+	 *
+	 * @param index index of the record whose recovery publication failed
+	 * @param publicationFailure publication failure
+	 * @return redelivery signal starting at the affected record
+	 */
+    private Redeliver recoveryUnavailable(int index, Exception publicationFailure) {
+        log.warn("Recovery publication failed, pausing consumption: {}", FailureClassifier.describe(publicationFailure));
+        outage.pause(FailureClassifier.RECOVERY_PRODUCER_UNAVAILABLE);
+
+        return new Redeliver(index, publicationFailure);
     }
 
     /**
@@ -578,5 +617,38 @@ public class ConnectorListener {
 	 */
     private String correlation(ConsumerRecord<byte[], byte[]> record) {
         return record.topic() + "/" + record.partition() + "/" + record.offset();
+    }
+
+    /**
+	 * Signals that batch processing stops at a record that must be redelivered,
+	 * together with all later records of the batch.
+	 */
+    private static final class Redeliver extends Exception {
+
+		private static final long serialVersionUID = 1L;
+
+		/** Index of the first record that was neither processed nor acknowledged. */
+		private final int index;
+
+		/**
+		 * Creates a redelivery signal with a sanitized reason.
+		 *
+		 * @param index first unprocessed record
+		 * @param reason sanitized reason
+		 */
+		Redeliver(int index, String reason) {
+			super(reason, null, false, false);
+			this.index = index;
+		}
+
+		/**
+		 * Creates a redelivery signal caused by a failure.
+		 *
+		 * @param index first unprocessed record
+		 * @param cause failure that stopped processing
+		 */
+		Redeliver(int index, Throwable cause) {
+			this(index, FailureClassifier.describe(cause));
+		}
     }
 }
