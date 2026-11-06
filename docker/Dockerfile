@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1.7
 FROM maven:3.9.11-eclipse-temurin-21 AS build
 WORKDIR /build
+# Uses HTTP(S)_PROXY/NO_PROXY build arguments for Maven; a maven_settings secret takes precedence
+COPY --chmod=755 docker/maven-proxy.sh /usr/local/bin/mvn-proxy
 COPY pom.xml .
-RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml,required=false mvn -B dependency:go-offline
+RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml,required=false mvn-proxy -B dependency:go-offline
 COPY src src
-RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml,required=false mvn -B clean package -DskipTests
+RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml,required=false mvn-proxy -B clean package -DskipTests
 
 FROM eclipse-temurin:21-jre-jammy
 RUN apt-get update \
@@ -14,7 +16,7 @@ RUN apt-get update \
 ENV TZ=UTC JAVA_TOOL_OPTIONS="-Duser.timezone=UTC"
 WORKDIR /app
 COPY --from=build /build/target/trustdeck-kafka-connector-1.0.0.jar /app/app.jar
-RUN chown -R connector:connector /app
+RUN mkdir -p /app/statistics && chown -R connector:connector /app
 USER connector
 EXPOSE 8080
 ENTRYPOINT ["java", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/app.jar"]

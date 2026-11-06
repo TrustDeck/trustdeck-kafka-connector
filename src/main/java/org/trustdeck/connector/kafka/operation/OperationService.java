@@ -22,10 +22,13 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.trustdeck.client.ProjectScope;
 import org.trustdeck.client.TrustDeckClient;
+import org.trustdeck.client.exception.TrustDeckResponseException;
 import org.trustdeck.client.model.Entity;
 import org.trustdeck.client.model.IdentifierItem;
 import org.trustdeck.client.model.Pseudonym;
@@ -43,6 +46,7 @@ import org.trustdeck.connector.kafka.mapping.MappedMessage;
  *
  * @author Armin Müller
  */
+@Slf4j
 @Service
 public class OperationService {
 
@@ -153,9 +157,13 @@ public class OperationService {
 	 * Creates a pseudonym-object from the mapped identifier and validity values.
 	 *
 	 * Only explicitly mapped validity settings are included in the request.
+	 * TrustDeck already answers an exact duplicate with 200 when the domain
+	 * allows one pseudonym per identifier. Every other rejection of an imported
+	 * pseudonym is a body-less 422, which is resolved by {@link #resolveRejectedImport}.
 	 *
 	 * @param message mapped connector input
-	 * @return created pseudonym
+	 * @return created or already existing pseudonym
+	 * @throws PseudonymConflictException if the imported pseudonym contradicts the domain
 	 */
 	private Pseudonym createPseudonym(MappedMessage message) {
 		Pseudonym pseudonym = Pseudonym.builder()
@@ -166,7 +174,96 @@ public class OperationService {
 				.validityTime(message.validityTime())
 				.build();
 
-		return projectScope.pseudonyms(message.domain()).create(pseudonym, false);
+		try {
+			return projectScope.pseudonyms(message.domain()).create(pseudonym, false);
+		} catch (TrustDeckResponseException rejection) {
+			if (rejection.getStatusCode() != 422 || message.psn() == null || message.psn().isBlank()) {
+				throw rejection;
+			}
+
+			return resolveRejectedImport(message, rejection);
+		}
+	}
+
+	/**
+	 * Determines why TrustDeck rejected an imported pseudonym with 422.
+	 *
+	 * The pseudonym value is looked up first: if it already belongs to the same
+	 * identifier and idType, the record was imported before (for example in a
+	 * domain that allows several pseudonyms per identifier) and counts as
+	 * success. If it belongs to someone else, or the identifier already holds a
+	 * different pseudonym, the record contradicts the domain. Otherwise the
+	 * rejection has another cause, such as an expired domain or the same
+	 * identifier and pseudonym being stored in a different domain, and the
+	 * original rejection is rethrown.
+	 *
+	 * @param message mapped connector input with an imported pseudonym
+	 * @param rejection the original 422 rejection
+	 * @return the identical, already existing pseudonym
+	 * @throws PseudonymConflictException if the imported pseudonym contradicts the domain
+	 * @throws TrustDeckResponseException the original rejection if no conflict was found
+	 */
+	private Pseudonym resolveRejectedImport(MappedMessage message, TrustDeckResponseException rejection) {
+		String psn = message.psn().trim();
+
+		Pseudonym byPsn = lookup(() -> projectScope.pseudonyms(message.domain()).get(psn), rejection);
+		if (byPsn != null) {
+			if (sameIdentifier(byPsn, message)) {
+				return byPsn;
+			}
+
+			throw new PseudonymConflictException(PseudonymConflictException.Reason.PSEUDONYM_ASSIGNED_ELSEWHERE, rejection);
+		}
+
+		Pseudonym byIdentifier = lookup(() -> projectScope.pseudonyms(message.domain())
+				.get(IdentifierItem.builder().identifier(message.identifier()).idType(message.idType()).build()), rejection);
+		if (byIdentifier != null) {
+			throw new PseudonymConflictException(PseudonymConflictException.Reason.IDENTIFIER_HAS_OTHER_PSEUDONYM, rejection);
+		}
+
+		throw rejection;
+	}
+
+	/**
+	 * Runs a pseudonym lookup used to explain a rejection.
+	 *
+	 * A 404 means nothing is stored. A missing read permission (403) leaves the
+	 * reason unknown, so the original rejection is rethrown instead of pausing
+	 * the connector. Other failures, such as an outage, propagate unchanged.
+	 *
+	 * @param lookup the lookup to run
+	 * @param rejection the original rejection
+	 * @return the stored pseudonym, or {@code null} if none exists
+	 */
+	private Pseudonym lookup(Supplier<Pseudonym> lookup, TrustDeckResponseException rejection) {
+		try {
+			return lookup.get();
+		} catch (TrustDeckResponseException failure) {
+			if (failure.getStatusCode() == 404) {
+				return null;
+			}
+
+			if (failure.getStatusCode() == 403) {
+				log.warn("Cannot explain a rejected pseudonym import: the connector lacks pseudonym:read permission.");
+				throw rejection;
+			}
+
+			throw failure;
+		}
+	}
+
+	/**
+	 * Tests whether a stored pseudonym belongs to the identifier and idType of a message.
+	 *
+	 * @param stored stored pseudonym
+	 * @param message mapped connector input
+	 * @return {@code true} if identifier and idType match
+	 */
+	private static boolean sameIdentifier(Pseudonym stored, MappedMessage message) {
+		IdentifierItem item = stored.getIdentifierItem();
+
+		return item != null && message.identifier() != null && message.identifier().equals(item.getIdentifier())
+				&& message.idType() != null && message.idType().equals(item.getIdType());
 	}
 
 	/**

@@ -17,12 +17,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
@@ -41,6 +43,7 @@ import org.trustdeck.connector.kafka.mapping.MappedMessage;
 import org.trustdeck.connector.kafka.mapping.MappingException;
 import org.trustdeck.connector.kafka.operation.OperationService;
 import org.trustdeck.connector.kafka.operation.PseudonymBatchService;
+import org.trustdeck.connector.kafka.operation.PseudonymConflictException;
 import org.trustdeck.connector.kafka.recovery.RecoveryPublisher;
 import org.trustdeck.connector.kafka.trustdeck.TokenAcquisitionException;
 
@@ -121,9 +124,9 @@ class ConnectorListenerTest {
         verify(acknowledgment).nack(0, Duration.ZERO);
     }
 
-    /** Sends a deterministic batch rejection to DLT rather than labeling it unknown. */
+    /** A batch that cannot be submitted is processed record by record instead of being dead-lettered. */
     @Test
-    void classifiesRejectedBatchAsDlt() throws Exception {
+    void processesRecordsIndividuallyWhenBatchIsNotAccepted() throws Exception {
         JsonMessageMapper mapper = mock(JsonMessageMapper.class);
         OperationService operations = mock(OperationService.class);
         RecoveryPublisher recovery = mock(RecoveryPublisher.class);
@@ -135,14 +138,180 @@ class ConnectorListenerTest {
         ConsumerRecord<byte[], byte[]> second = record(1, new byte[] {2});
         when(mapper.map(first.value())).thenReturn(mapped());
         when(mapper.map(second.value())).thenReturn(mapped());
-        doThrow(new IllegalArgumentException("batch rejected")).when(batches).execute(anyList());
+        doThrow(new IllegalArgumentException("batch exceeds byte limit")).when(batches).execute(anyList());
 
         new ConnectorListener(mapper, operations, recovery, properties, batches, outage)
                 .onMessage(List.of(first, second), acknowledgment);
 
-        verify(recovery, times(2)).publishDlt(any(), any(), eq("TRANSIENT_OPERATION_FAILURE"), eq(0),
-                any(IllegalArgumentException.class));
-        verify(recovery, never()).publishUnknown(any(), any(), any(), any());
+        verify(operations, times(2)).execute(any(), any());
+        verify(recovery, never()).publishDlt(any(), any(), any(), anyInt(), any());
+        InOrder order = inOrder(acknowledgment);
+        order.verify(acknowledgment).acknowledge(0);
+        order.verify(acknowledgment).acknowledge(1);
+    }
+
+    /**
+     * A batch rejected as a whole (422, e.g. every record already exists) falls back to single creates.
+     * The duplicate succeeds there; a record TrustDeck still rejects goes to the DLT without retries.
+     */
+    @Test
+    void wholeBatchRejectionFallsBackAndDoesNotRetryRejections() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        RecoveryPublisher recovery = mock(RecoveryPublisher.class);
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        ConsumerRecord<byte[], byte[]> duplicate = record(0, new byte[] {1});
+        ConsumerRecord<byte[], byte[]> invalid = record(1, new byte[] {2});
+        when(mapper.map(any())).thenReturn(mapped());
+        doThrow(new TrustDeckResponseException("rejected", HttpStatusCode.valueOf(422))).when(batches).execute(anyList());
+        when(operations.execute(any(), eq("source/0/1"))).thenThrow(new TrustDeckResponseException("rejected", HttpStatusCode.valueOf(422)));
+
+        new ConnectorListener(mapper, operations, recovery, properties("CREATE_PSEUDONYM"), batches, mock(OutageCoordinator.class))
+                .onMessage(List.of(duplicate, invalid), acknowledgment);
+
+        verify(operations, times(1)).execute(any(), eq("source/0/1"));
+        verify(recovery).publishDlt(eq(invalid), any(), eq("REJECTED_BY_TRUSTDECK"), eq(0), any(TrustDeckResponseException.class));
+        verify(recovery, never()).publishDlt(eq(duplicate), any(), any(), anyInt(), any());
+        InOrder order = inOrder(acknowledgment);
+        order.verify(acknowledgment).acknowledge(0);
+        order.verify(acknowledgment).acknowledge(1);
+        verify(acknowledgment, never()).nack(anyInt(), any());
+    }
+
+    /** Records confirmed by a partial response are acknowledged; only the others are created singly. */
+    @Test
+    void partialBatchProcessesOnlyUnconfirmedRecords() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        ConsumerRecord<byte[], byte[]> first = record(0, new byte[] {1});
+        ConsumerRecord<byte[], byte[]> second = record(1, new byte[] {2});
+        ConsumerRecord<byte[], byte[]> third = record(2, new byte[] {3});
+        when(mapper.map(any())).thenReturn(mapped());
+        when(batches.execute(anyList())).thenReturn(Set.of(1));
+
+        new ConnectorListener(mapper, operations, mock(RecoveryPublisher.class), properties("CREATE_PSEUDONYM"), batches,
+                mock(OutageCoordinator.class)).onMessage(List.of(first, second, third), acknowledgment);
+
+        verify(operations).execute(any(), eq("source/0/0"));
+        verify(operations, never()).execute(any(), eq("source/0/1"));
+        verify(operations).execute(any(), eq("source/0/2"));
+        InOrder order = inOrder(acknowledgment);
+        order.verify(acknowledgment).acknowledge(0);
+        order.verify(acknowledgment).acknowledge(1);
+        order.verify(acknowledgment).acknowledge(2);
+    }
+
+    /** A fully confirmed batch is acknowledged at once without single creates. */
+    @Test
+    void completeBatchIsAcknowledgedAtOnce() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        when(mapper.map(any())).thenReturn(mapped());
+        when(batches.execute(anyList())).thenReturn(Set.of(0, 1));
+
+        new ConnectorListener(mapper, operations, mock(RecoveryPublisher.class), properties("CREATE_PSEUDONYM"), batches,
+                mock(OutageCoordinator.class)).onMessage(List.of(record(0, new byte[] {1}), record(1, new byte[] {2})), acknowledgment);
+
+        verify(operations, never()).execute(any(), any());
+        verify(acknowledgment).acknowledge(1);
+    }
+
+    /** A poll spanning two partitions is sent as one batch per partition instead of record by record. */
+    @Test
+    void splitsMixedPartitionPollIntoBatches() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        when(mapper.map(any())).thenReturn(mapped());
+        when(batches.execute(anyList())).thenReturn(Set.of(0, 1));
+        List<ConsumerRecord<byte[], byte[]>> poll = List.of(record(0, 0, new byte[] {1}), record(0, 1, new byte[] {2}),
+                record(1, 0, new byte[] {3}), record(1, 1, new byte[] {4}));
+
+        new ConnectorListener(mapper, operations, mock(RecoveryPublisher.class), properties("CREATE_PSEUDONYM"), batches,
+                mock(OutageCoordinator.class)).onMessage(poll, acknowledgment);
+
+        verify(batches, times(2)).execute(argThat(chunk -> chunk.size() == 2));
+        verify(operations, never()).execute(any(), any());
+        InOrder order = inOrder(acknowledgment);
+        order.verify(acknowledgment).acknowledge(1);
+        order.verify(acknowledgment).acknowledge(3);
+    }
+
+    /** Chunks respect the configured batch size; a leftover record forms its own chunk. */
+    @Test
+    void limitsChunksToBatchSize() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        ConnectorProperties properties = properties("CREATE_PSEUDONYM");
+        properties.setBatchSize(2);
+        when(mapper.map(any())).thenReturn(mapped());
+        when(batches.execute(anyList())).thenReturn(Set.of(0, 1), Set.of(0));
+
+        new ConnectorListener(mapper, operations, mock(RecoveryPublisher.class), properties, batches, mock(OutageCoordinator.class))
+                .onMessage(List.of(record(0, new byte[] {1}), record(1, new byte[] {2}), record(2, new byte[] {3})), acknowledgment);
+
+        verify(batches).execute(argThat(chunk -> chunk.size() == 2));
+        verify(batches).execute(argThat(chunk -> chunk.size() == 1));
+        verify(operations, never()).execute(any(), any());
+        InOrder order = inOrder(acknowledgment);
+        order.verify(acknowledgment).acknowledge(1);
+        order.verify(acknowledgment).acknowledge(2);
+    }
+
+    /** An invalid record in the middle splits the poll; the records around it are still batched. */
+    @Test
+    void invalidRecordSplitsChunks() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        RecoveryPublisher recovery = mock(RecoveryPublisher.class);
+        PseudonymBatchService batches = mock(PseudonymBatchService.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        List<ConsumerRecord<byte[], byte[]>> poll = List.of(record(0, new byte[] {1}), record(1, new byte[] {2}),
+                record(2, new byte[] {3}), record(3, new byte[] {4}), record(4, new byte[] {5}));
+        when(mapper.map(any())).thenReturn(mapped());
+        when(mapper.map(poll.get(2).value())).thenThrow(new MappingException("invalid"));
+        when(batches.execute(anyList())).thenReturn(Set.of(0, 1));
+
+        new ConnectorListener(mapper, operations, recovery, properties("CREATE_PSEUDONYM"), batches, mock(OutageCoordinator.class))
+                .onMessage(poll, acknowledgment);
+
+        verify(batches, times(2)).execute(argThat(chunk -> chunk.size() == 2));
+        verify(recovery).publishDlt(eq(poll.get(2)), any(), eq("INVALID_MAPPING"), eq(0), any());
+        InOrder order = inOrder(acknowledgment);
+        order.verify(acknowledgment).acknowledge(1);
+        order.verify(acknowledgment).acknowledge(2);
+        order.verify(acknowledgment).acknowledge(4);
+    }
+
+    /** A contradicting imported pseudonym goes to the review topic, not the DLT. */
+    @Test
+    void publishesPseudonymConflictToReview() throws Exception {
+        JsonMessageMapper mapper = mock(JsonMessageMapper.class);
+        OperationService operations = mock(OperationService.class);
+        RecoveryPublisher recovery = mock(RecoveryPublisher.class);
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        ConsumerRecord<byte[], byte[]> source = record(0, new byte[] {1});
+        when(mapper.map(source.value())).thenReturn(mapped());
+        PseudonymConflictException conflict = new PseudonymConflictException(
+                PseudonymConflictException.Reason.IDENTIFIER_HAS_OTHER_PSEUDONYM,
+                new TrustDeckResponseException("rejected", HttpStatusCode.valueOf(422)));
+        when(operations.execute(any(), any())).thenThrow(conflict);
+
+        new ConnectorListener(mapper, operations, recovery, properties("UPDATE_PSEUDONYM"), mock(PseudonymBatchService.class),
+                mock(OutageCoordinator.class)).onMessage(List.of(source), acknowledgment);
+
+        verify(recovery).publishConflict(source, mapped(), conflict);
+        verify(recovery, never()).publishDlt(any(), any(), any(), anyInt(), any());
+        verify(operations, times(1)).execute(any(), any());
+        verify(acknowledgment).acknowledge(0);
     }
 
     /** Routes a TrustDeck linkage conflict to the review topic and acknowledges it. */
@@ -298,6 +467,10 @@ class ConnectorListenerTest {
 
     private ConsumerRecord<byte[], byte[]> record(long offset, byte[] value) {
         return new ConsumerRecord<>("source", 0, offset, new byte[] {(byte) offset}, value);
+    }
+
+    private ConsumerRecord<byte[], byte[]> record(int partition, long offset, byte[] value) {
+        return new ConsumerRecord<>("source", partition, offset, new byte[] {(byte) offset}, value);
     }
 
     private MappedMessage mapped() {

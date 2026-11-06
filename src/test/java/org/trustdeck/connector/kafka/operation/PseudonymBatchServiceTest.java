@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -22,10 +23,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.trustdeck.client.TrustDeckClient;
+import org.trustdeck.client.exception.TrustDeckResponseException;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
 import org.trustdeck.connector.kafka.mapping.MappedMessage;
 
-/** Verifies safe reconciliation of a known partial batch response. */
+/** Verifies correlation of batch responses to the submitted source records. */
 class PseudonymBatchServiceTest {
 
     private HttpServer server;
@@ -45,9 +47,9 @@ class PseudonymBatchServiceTest {
         server.stop(0);
     }
 
-    /** Reconciles one returned success and creates only the unresolved occurrence singly. */
+    /** A partial response reports only the created record and leaves the rest to the caller. */
     @Test
-    void fallsBackToSinglesForKnownPartialResponse() {
+    void reportsCreatedIndexesOfPartialResponse() {
         ConnectorProperties properties = new ConnectorProperties();
         properties.getTrustdeck().setProject("synthetic-project");
         properties.setBatchSize(10);
@@ -56,11 +58,26 @@ class PseudonymBatchServiceTest {
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
         List<MappedMessage> messages = List.of(message("one", "p1"), message("two", "p2"));
 
-        List<org.trustdeck.client.model.Pseudonym> result = new PseudonymBatchService(client, properties, mapper)
-                .execute(messages);
+        Set<Integer> created = new PseudonymBatchService(client, properties, mapper).execute(messages);
 
-        assertEquals(2, result.size());
-        assertEquals(1, singleCreates);
+        assertEquals(Set.of(0), created);
+        assertEquals(0, singleCreates);
+    }
+
+    /** A batch in which nothing was created is rejected as a whole and surfaces the 422. */
+    @Test
+    void propagatesWholeBatchRejection() {
+        responseMode = "rejected";
+        ConnectorProperties properties = new ConnectorProperties();
+        properties.getTrustdeck().setProject("synthetic-project");
+        properties.setBatchSize(10);
+        properties.setBatchBytes(100_000);
+        TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
+
+        TrustDeckResponseException failure = assertThrows(TrustDeckResponseException.class, () -> new PseudonymBatchService(client,
+                properties, new ObjectMapper().registerModule(new JavaTimeModule())).execute(List.of(message("one", "p1"))));
+        assertEquals(422, failure.getStatusCode());
+        assertEquals(0, singleCreates);
     }
 
     /** Verifies an optional validity duration is retained in a batch request. */
@@ -103,11 +120,11 @@ class PseudonymBatchServiceTest {
         properties.setBatchBytes(100_000);
         TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
 
-        List<org.trustdeck.client.model.Pseudonym> result = new PseudonymBatchService(client, properties,
+        Set<Integer> created = new PseudonymBatchService(client, properties,
                 new ObjectMapper().registerModule(new JavaTimeModule())).execute(
                         List.of(message("one", "p1"), message("two", "p2")));
 
-        assertEquals(2, result.size());
+        assertEquals(Set.of(0, 1), created);
         assertEquals(0, singleCreates);
     }
 
@@ -121,11 +138,11 @@ class PseudonymBatchServiceTest {
         properties.setBatchBytes(100_000);
         TrustDeckClient client = new TrustDeckClient("http://localhost:" + server.getAddress().getPort(), () -> "token");
 
-        List<org.trustdeck.client.model.Pseudonym> result = new PseudonymBatchService(client, properties,
+        Set<Integer> created = new PseudonymBatchService(client, properties,
                 new ObjectMapper().registerModule(new JavaTimeModule())).execute(
                         List.of(message("one", "p1"), message("one", "p1")));
 
-        assertEquals(2, result.size());
+        assertEquals(Set.of(0, 1), created);
         assertEquals(0, singleCreates);
     }
 
@@ -185,6 +202,11 @@ class PseudonymBatchServiceTest {
         };
         if (!batch) {
             response = "{\"identifierItem\":{\"identifier\":\"two\",\"idType\":\"type\"},\"psn\":\"p2\"}";
+        }
+        if (batch && responseMode.equals("rejected")) {
+            exchange.sendResponseHeaders(422, -1);
+            exchange.close();
+            return;
         }
         byte[] body = response.getBytes(StandardCharsets.UTF_8);
         exchange.sendResponseHeaders(batch ? 206 : 201, body.length);

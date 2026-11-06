@@ -24,6 +24,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +42,7 @@ import org.trustdeck.connector.kafka.mapping.MappedMessage;
 import org.trustdeck.connector.kafka.mapping.MappingException;
 import org.trustdeck.connector.kafka.operation.OperationService;
 import org.trustdeck.connector.kafka.operation.PseudonymBatchService;
+import org.trustdeck.connector.kafka.operation.PseudonymConflictException;
 import org.trustdeck.connector.kafka.recovery.RecoveryPublisher;
 import org.trustdeck.connector.kafka.statistics.ConnectorStatistics;
 import org.trustdeck.connector.kafka.trustdeck.TrustDeckPreflight;
@@ -224,18 +226,17 @@ public class ConnectorListener {
 			invalidCategory.add(category);
 		}
 
-		// Process eligible pseudonym-create polls as one correlated TrustDeck batch
-		if (properties.getOperation().equals("CREATE_PSEUDONYM") && safeBatch(records, mapped)) {
-			processBatch(records, mapped, acknowledgment);
-			return;
-		}
+		boolean batchable = properties.getOperation().equals("CREATE_PSEUDONYM");
 
-		// Process records individually; invalid records are published to the DLT in input order
-		for (int index = 0; index < records.size(); index++) {
+		// Process records in input order: invalid records go to the DLT, runs of compatible
+		// pseudonym creates are sent as one TrustDeck batch, everything else individually
+		int index = 0;
+		while (index < records.size()) {
 			if (mapped.get(index) == null) {
 				// Invalid records were not published during mapping, so a budget stop cannot duplicate DLT entries
 				publishDlt(records.get(index), null, invalidCategory.get(index), 0, invalid.get(index), index);
 				acknowledgment.acknowledge(index);
+				index++;
 				continue;
 			}
 
@@ -244,46 +245,142 @@ public class ConnectorListener {
 				throw new Redeliver(index, "batch time budget exhausted");
 			}
 
-			processOne(records.get(index), mapped.get(index), acknowledgment, index, deadline);
+			if (batchable && batchable(mapped.get(index))) {
+				int end = chunkEnd(records, mapped, index);
+				processBatch(records, mapped, index, end, acknowledgment, deadline);
+				index = end;
+			} else {
+				processOne(records.get(index), mapped.get(index), acknowledgment, index, deadline);
+				index++;
+			}
 		}
+    }
+
+    /**
+	 * Determines the end of the batchable chunk that starts at a record.
+	 *
+	 * A chunk contains consecutive mapped records of the same Kafka partition and
+	 * TrustDeck domain that carry an imported pseudonym and identical validity
+	 * settings, up to the configured batch size. Kafka returns the records of one
+	 * partition contiguously, so a poll spanning several partitions or domains is
+	 * split into several batches instead of being processed record by record.
+	 *
+	 * @param records source records from one Kafka poll
+	 * @param mapped corresponding mapped messages
+	 * @param start index of the first record of the chunk, which must be {@link #batchable(MappedMessage) batchable}
+	 * @return exclusive end index of the chunk, at least {@code start + 1}
+	 */
+    private int chunkEnd(List<ConsumerRecord<byte[], byte[]>> records, List<MappedMessage> mapped, int start) {
+        MappedMessage first = mapped.get(start);
+        int limit = Math.min(records.size(), start + Math.max(1, properties.getBatchSize()));
+        int end = start + 1;
+        while (end < limit && compatible(records.get(start), first, records.get(end), mapped.get(end))) {
+            end++;
+        }
+
+        return end;
+    }
+
+    /**
+	 * Tests whether a mapped record can be created through the batch endpoint.
+	 *
+	 * Only imported pseudonyms can be correlated safely with the batch response.
+	 *
+	 * @param message mapped record
+	 * @return {@code true} if the record carries a domain and an imported pseudonym
+	 */
+    private static boolean batchable(MappedMessage message) {
+        return message.psn() != null && message.domain() != null;
+    }
+
+    /**
+	 * Tests whether a record can join the batch started by another record.
+	 *
+	 * @param firstRecord first record of the batch
+	 * @param first mapped first record
+	 * @param record candidate record
+	 * @param message mapped candidate record, may be {@code null}
+	 * @return {@code true} if the candidate can be correlated safely within the same batch
+	 */
+    private static boolean compatible(ConsumerRecord<byte[], byte[]> firstRecord, MappedMessage first,
+    				ConsumerRecord<byte[], byte[]> record, MappedMessage message) {
+        return message != null
+                && record.partition() == firstRecord.partition()
+                && first.domain().equals(message.domain())
+                && message.psn() != null
+                && Objects.equals(first.validityTime(), message.validityTime())
+                && Objects.equals(first.validFrom(), message.validFrom())
+                && Objects.equals(first.validTo(), message.validTo());
     }
 
     /**
 	 * Processes a safe pseudonym-create batch as one TrustDeck request.
 	 *
+	 * TrustDeck reports duplicates and conflicts in a batch only indirectly: a
+	 * partial response (206) omits them, and a batch in which nothing was created
+	 * is rejected as a whole (422), even if every record merely exists already.
+	 * Every record the batch did not confirm is therefore processed individually,
+	 * where an exact duplicate succeeds and a real conflict can be told apart from
+	 * other rejections. A batch that cannot be submitted at all, for example
+	 * because it exceeds the byte limit, is processed individually as well.
+	 *
 	 * @param records source records from one Kafka poll
-	 * @param mapped corresponding mapped messages, none of them {@code null}
+	 * @param mapped corresponding mapped messages
+	 * @param from index of the first record of the chunk
+	 * @param to exclusive end index of the chunk; all records in between are mapped and compatible
 	 * @param acknowledgment manual batch acknowledgment
-	 * @throws Redeliver if a systemic failure paused consumption or recovery publication failed
+	 * @param deadline {@link System#nanoTime()} value after which no further record or retry is started
+	 * @throws Redeliver if a systemic failure paused consumption, the time budget ran out, or recovery publication failed
+	 * @throws InterruptedException if a retry delay is interrupted
 	 */
-    private void processBatch(List<ConsumerRecord<byte[], byte[]>> records, List<MappedMessage> mapped,
-    				Acknowledgment acknowledgment) throws Redeliver {
+    private void processBatch(List<ConsumerRecord<byte[], byte[]>> records, List<MappedMessage> mapped, int from, int to,
+    				Acknowledgment acknowledgment, long deadline) throws Redeliver, InterruptedException {
+		List<MappedMessage> chunk = mapped.subList(from, to);
+		Set<Integer> created;
+
 		try {
-			verifyTargets(mapped);
-			batches.execute(mapped);
+			verifyTargets(chunk);
+			created = batches.execute(chunk);
 		} catch (Exception failure) {
 			if (FailureClassifier.systemic(failure)) {
-				pause(failure, failedDomain(mapped), failedEntityType(mapped));
-				throw new Redeliver(0, failure);
+				pause(failure, failedDomain(chunk), failedEntityType(chunk));
+				throw new Redeliver(from, failure);
 			}
 
-			boolean unknown = failure instanceof IllegalStateException;
-
-			// Publish and acknowledge each source record according to the batch failure outcome
-			for (int index = 0; index < records.size(); index++) {
-				if (unknown) {
+			if (failure instanceof IllegalStateException) {
+				// The response could not be correlated, so whether TrustDeck stored the records is unknown
+				for (int index = from; index < to; index++) {
 					publishUnknown(records.get(index), mapped.get(index), failure,
 							operations.completedUuid(correlation(records.get(index))), index);
-				} else {
-					publishDlt(records.get(index), mapped.get(index), FailureClassifier.category(failure), 0, failure, index);
+					acknowledgment.acknowledge(index);
 				}
-				acknowledgment.acknowledge(index);
+
+				return;
 			}
 
+			log.debug("Pseudonym batch not accepted, processing {} record(s) individually: {}", to - from,
+					FailureClassifier.describe(failure));
+			created = Set.of();
+		}
+
+		if (created.size() == to - from) {
+			acknowledgment.acknowledge(to - 1);
 			return;
 		}
 
-		acknowledgment.acknowledge();
+		// Acknowledge confirmed records and process the rest individually, strictly in input order
+		for (int index = from; index < to; index++) {
+			if (created.contains(index - from)) {
+				acknowledgment.acknowledge(index);
+				continue;
+			}
+
+			if (index > 0 && System.nanoTime() >= deadline) {
+				throw new Redeliver(index, "batch time budget exhausted");
+			}
+
+			processOne(records.get(index), mapped.get(index), acknowledgment, index, deadline);
+		}
     }
 
     /**
@@ -310,6 +407,9 @@ public class ConnectorListener {
             acknowledgment.acknowledge(index);
         } catch (RecordLinkageConflictException exception) {
             publishReview(record, mapped, 1, exception, index);
+            acknowledgment.acknowledge(index);
+        } catch (PseudonymConflictException exception) {
+            publishConflict(record, mapped, exception, index);
             acknowledgment.acknowledge(index);
         } catch (MappingException | IllegalArgumentException exception) {
             publishDlt(record, mapped, "INVALID_MAPPING", 0, exception, index);
@@ -352,33 +452,6 @@ public class ConnectorListener {
     }
 
     /**
-	 * Determines whether the current poll can be processed as one pseudonym batch.
-	 *
-	 * A batch is considered safe only when every record was mapped successfully,
-	 * belongs to the same Kafka partition and TrustDeck domain, contains a
-	 * pseudonym value, and uses identical validity settings.
-	 *
-	 * @param records source records from the current poll
-	 * @param mappedMessages corresponding mapped messages
-	 * @return {@code true} if the records can be correlated and processed safely as one batch, otherwise {@code false}
-	 */
-    private boolean safeBatch(List<ConsumerRecord<byte[], byte[]>> records, List<MappedMessage> mappedMessages) {
-        if (records.isEmpty() || mappedMessages.stream().anyMatch(Objects::isNull)) {
-            return false;
-        }
-
-        int partition = records.getFirst().partition();
-        MappedMessage first = mappedMessages.getFirst();
-        String domain = first.domain();
-
-        return records.stream().allMatch(record -> record.partition() == partition)
-                && mappedMessages.stream().allMatch(message -> domain.equals(message.domain()) && message.psn() != null
-                        && Objects.equals(first.validityTime(), message.validityTime())
-                        && Objects.equals(first.validFrom(), message.validFrom())
-                        && Objects.equals(first.validTo(), message.validTo()));
-    }
-
-    /**
 	 * Retries a record-local operation using bounded delays before publishing the
 	 * record to the dead-letter topic.
 	 *
@@ -405,6 +478,13 @@ public class ConnectorListener {
             throw new Redeliver(index, failure);
         }
 
+    	// A definitive client error cannot change on retry
+    	if (FailureClassifier.rejected(failure)) {
+    		publishDlt(record, mapped, FailureClassifier.REJECTED_BY_TRUSTDECK, 0, failure, index);
+    		acknowledgment.acknowledge(index);
+    		return;
+    	}
+
     	// Attempt to redo the operation
     	int attempts = properties.getRecovery().getMaxAttempts();
         for (int attempt = 1; attempt <= attempts; attempt++) {
@@ -428,6 +508,12 @@ public class ConnectorListener {
                 if (FailureClassifier.systemic(retryFailure)) {
                     pause(retryFailure, mapped.domain(), mapped.entityType());
                     throw new Redeliver(index, retryFailure);
+                }
+
+                if (FailureClassifier.rejected(retryFailure)) {
+                    publishDlt(record, mapped, FailureClassifier.REJECTED_BY_TRUSTDECK, attempt, retryFailure, index);
+                    acknowledgment.acknowledge(index);
+                    return;
                 }
             }
         }
@@ -500,7 +586,9 @@ public class ConnectorListener {
 	 * @param entityType failed dynamic entity type, or {@code null}
 	 */
     private void pause(Throwable failure, String domain, String entityType) {
-        log.warn("Systemic failure, pausing consumption: {}", FailureClassifier.describe(failure));
+        // Domain and entity type names are configuration, not record content, and tell the operator what to fix
+        log.warn("Systemic failure, pausing consumption{}{}: {}", domain == null ? "" : " (domain " + domain + ")",
+                entityType == null ? "" : " (entity type " + entityType + ")", FailureClassifier.describe(failure));
         outage.pause(FailureClassifier.category(failure), domain, entityType, properties.getTrustdeck().getProject());
     }
 
@@ -544,6 +632,27 @@ public class ConnectorListener {
     				int index) throws Redeliver {
         try {
             recovery.publishReview(record, mapped, attempts, failure);
+        } catch (Exception publicationFailure) {
+            throw recoveryUnavailable(index, publicationFailure);
+        }
+    }
+
+    /**
+	 * Publishes an imported pseudonym that contradicts the target domain to the review topic.
+	 *
+	 * If review publication itself fails, source consumption is paused and the
+	 * source record remains unacknowledged.
+	 *
+	 * @param record original Kafka source record
+	 * @param mapped mapped connector message
+	 * @param conflict detected conflict
+	 * @param index index of the record within the current batch
+	 * @throws Redeliver if review publication cannot be confirmed
+	 */
+    private void publishConflict(ConsumerRecord<byte[], byte[]> record, MappedMessage mapped, PseudonymConflictException conflict,
+    				int index) throws Redeliver {
+        try {
+            recovery.publishConflict(record, mapped, conflict);
         } catch (Exception publicationFailure) {
             throw recoveryUnavailable(index, publicationFailure);
         }

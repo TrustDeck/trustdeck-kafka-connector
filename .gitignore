@@ -15,3 +15,4 @@ target/
 *.iml
 docker-compose.override.local.yml
 config/local/
+statistics/

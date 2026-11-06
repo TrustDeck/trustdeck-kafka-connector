@@ -27,10 +27,13 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
+import org.trustdeck.client.exception.TrustDeckResponseException;
 import org.trustdeck.connector.kafka.config.ConnectorProperties;
 import org.trustdeck.connector.kafka.mapping.MappedMessage;
+import org.trustdeck.connector.kafka.operation.PseudonymConflictException;
 import org.trustdeck.connector.kafka.recovery.RecoveryPublisher;
 
 /** Verifies safe, confirmed recovery envelope publication. */
@@ -73,6 +76,34 @@ class RecoveryPublisherTest {
         assertEquals(1, envelope.get("safeHeaders").size());
         assertArrayEquals(key, Base64.getDecoder().decode(envelope.get("keyBase64").asText()));
         assertArrayEquals(value, Base64.getDecoder().decode(envelope.get("valueBase64").asText()));
+    }
+
+    /** A pseudonym conflict goes to the review topic with its reason and the 422 status of the wrapped rejection. */
+    @Test
+    void publishesPseudonymConflictForReview() throws Exception {
+        @SuppressWarnings("unchecked")
+		KafkaTemplate<String, String> template = mock(KafkaTemplate.class);
+        ConnectorProperties properties = new ConnectorProperties();
+        properties.setOperation("CREATE_PSEUDONYM");
+        properties.getRecovery().setReviewTopic("source.review");
+        ObjectMapper mapper = new ObjectMapper();
+        when(template.send(eq("source.review"), eq(null), anyString())).thenReturn(CompletableFuture.completedFuture(
+                new SendResult<>(null, new RecordMetadata(new TopicPartition("source.review", 0), 0, 0, 0, 0, 0))));
+        ConsumerRecord<byte[], byte[]> record = new ConsumerRecord<>("source", 0, 3, null, new byte[] {1});
+        MappedMessage mapped = new MappedMessage("datalake", "identifier", "type", "psn", null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null);
+
+        new RecoveryPublisher(template, properties, mapper).publishConflict(record, mapped, new PseudonymConflictException(
+                PseudonymConflictException.Reason.IDENTIFIER_HAS_OTHER_PSEUDONYM,
+                new TrustDeckResponseException("rejected", HttpStatusCode.valueOf(422))));
+
+        ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
+        verify(template).send(eq("source.review"), eq(null), jsonCaptor.capture());
+        JsonNode envelope = mapper.readTree(jsonCaptor.getValue());
+        assertEquals("PENDING_CONFLICT_REVIEW", envelope.get("status").asText());
+        assertEquals("PSEUDONYM_CONFLICT_IDENTIFIER_HAS_OTHER_PSEUDONYM", envelope.get("failureCategory").asText());
+        assertEquals(422, envelope.get("httpStatus").asInt());
+        assertEquals("datalake", envelope.get("resolvedTarget").asText());
     }
 
     /** Ensures a failed producer confirmation prevents recovery publication from being treated as complete. */
