@@ -9,6 +9,9 @@
 target/
 .idea/
 .vscode/
+.classpath
+.project
+.settings/
 *.iml
 docker-compose.override.local.yml
 config/local/

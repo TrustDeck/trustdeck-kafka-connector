@@ -1,0 +1,140 @@
+spring:
+  application:
+    name: trustdeck-kafka-connector
+  main:
+    # The connector exposes the guarded replay endpoint and Actuator health URLs
+    # It remains Kafka-driven; no application traffic is required for processing
+    web-application-type: servlet
+  kafka:
+    # Standard Spring Kafka settings: Kafka credentials and the broker URL are required
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    consumer:
+      group-id: ${KAFKA_GROUP_ID}
+      # Manual acknowledgments let the listener commit only after processing or recovery publication
+      enable-auto-commit: false
+      # New groups start at the beginning; an existing committed offset still wins
+      auto-offset-reset: earliest
+      # Record count and fetch bytes bound one listener poll
+      max-poll-records: ${KAFKA_MAX_POLL_RECORDS:100}
+      max-partition-fetch-bytes: ${KAFKA_MAX_PARTITION_FETCH_BYTES:1048576}
+      properties:
+        # Must exceed the worst sequential HTTP and retry budget
+        max.poll.interval.ms: ${KAFKA_MAX_POLL_INTERVAL_MS:300000}
+    producer:
+      # Recovery records are not considered committed until the broker confirms them
+      acks: all
+      properties:
+        # Maximum DLT/review request size in bytes
+        max.request.size: ${KAFKA_MAX_REQUEST_SIZE:1048576}
+    properties:
+      security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_SSL}
+      sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
+      sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
+      ssl.truststore.location: ${KAFKA_TRUSTSTORE_LOCATION:}
+      ssl.truststore.password: ${KAFKA_TRUSTSTORE_PASSWORD:}
+      ssl.truststore.type: ${KAFKA_TRUSTSTORE_TYPE:JKS}
+  jackson:
+    # Omit absent optional fields from TrustDeck and recovery JSON
+    default-property-inclusion: non_null
+  mail:
+    # Optional standard Spring Boot SMTP transport settings. SMTP_TO controls delivery
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:25}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${SMTP_STARTTLS:false}
+      mail.smtp.ssl.enable: ${SMTP_SSL_ENABLE:false}
+      mail.smtp.connectiontimeout: ${SMTP_CONNECTION_TIMEOUT:5000}
+      mail.smtp.timeout: ${SMTP_READ_TIMEOUT:10000}
+      mail.smtp.writetimeout: ${SMTP_WRITE_TIMEOUT:10000}
+
+server:
+  # Port for /actuator/health/{readiness,liveness} and the guarded /internal/replay endpoint
+  # This HTTP surface supports operations and probes; record processing remains Kafka-driven
+  port: ${HEALTH_PORT:8080}
+  # Allow listener containers and in-flight recovery publication to finish on shutdown
+  shutdown: graceful
+
+management:
+  # Expose only health; details are intentionally hidden
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    group:
+      readiness:
+        include: readinessState,connector
+      liveness:
+        include: livenessState
+
+connector:
+  # One fixed operation is selected per connector instance
+  operation: ${TRUSTDECK_OPERATION}
+  source-topic: ${KAFKA_TOPIC}
+  group-id: ${KAFKA_GROUP_ID}
+  max-record-bytes: ${KAFKA_MAX_RECORD_BYTES:1048576}
+  max-poll-records: ${KAFKA_MAX_POLL_RECORDS:100}
+  concurrency: ${KAFKA_CONCURRENCY:2}
+  batch-size: ${TRUSTDECK_BATCH_SIZE:100}
+  batch-bytes: ${TRUSTDECK_BATCH_BYTES:262144}
+  connect-timeout: ${TRUSTDECK_CONNECT_TIMEOUT:5s}
+  read-timeout: ${TRUSTDECK_READ_TIMEOUT:30s}
+  preflight:
+    enabled: ${CONNECTOR_PREFLIGHT_ENABLED:true}
+  replay:
+    enabled: ${CONNECTOR_REPLAY_ENABLED:false}
+  trustdeck:
+    service-url: ${TRUSTDECK_SERVICE_URL}
+    token-endpoint: ${KEYCLOAK_TOKEN_ENDPOINT}
+    client-id: ${KEYCLOAK_CLIENT_ID}
+    client-secret: ${KEYCLOAK_CLIENT_SECRET}
+    project: ${TRUSTDECK_PROJECT:}
+    entity-type: ${TRUSTDECK_ENTITY_TYPE:}
+  mapping:
+    # Provide only the mappings required by the selected operation. Mappings used exclusively by other operations may be omitted. Optional mappings may also be omitted.
+    # Mapping values are JSON Pointer paths (or an unambiguous bare top-level name).
+    # A nonblank constant domain takes precedence over the domain path.
+    common:
+      domain-constant: ${TRUSTDECK_DOMAIN:}
+      domain-path: ${KAFKA_MESSAGE_SOURCE_SYSTEM_DESCRIPTOR:}
+      identifier-path: ${KAFKA_MESSAGE_IDENTIFIER_DESCRIPTOR:}
+      id-type-path: ${KAFKA_MESSAGE_IDTYPE_DESCRIPTOR:}
+      psn-path: ${KAFKA_MESSAGE_PSN_DESCRIPTOR:}
+      validity-time-path: ${KAFKA_MESSAGE_VALIDITY_TIME_DESCRIPTOR:}
+      valid-from-path: ${KAFKA_MESSAGE_VALID_FROM_DESCRIPTOR:}
+      valid-to-path: ${KAFKA_MESSAGE_VALID_TO_DESCRIPTOR:}
+      username-path: ${KAFKA_MESSAGE_USERNAME_DESCRIPTOR:}
+      entity-type-path: ${KAFKA_MESSAGE_ENTITY_TYPE_DESCRIPTOR:}
+      entity-id-path: ${KAFKA_MESSAGE_ENTITY_ID_DESCRIPTOR:}
+      source-timezone: ${MAPPING_SOURCE_TIMEZONE:UTC}
+      datetime-format: ${MAPPING_DATETIME_FORMAT:}
+    update-pseudonym:
+      old-identifier-path: ${KAFKA_MESSAGE_OLD_IDENTIFIER_DESCRIPTOR:}
+      old-id-type-path: ${KAFKA_MESSAGE_OLD_IDTYPE_DESCRIPTOR:}
+      old-psn-path: ${KAFKA_MESSAGE_OLD_PSN_DESCRIPTOR:}
+      new-identifier-path: ${KAFKA_MESSAGE_NEW_IDENTIFIER_DESCRIPTOR:}
+      new-id-type-path: ${KAFKA_MESSAGE_NEW_IDTYPE_DESCRIPTOR:}
+      new-psn-path: ${KAFKA_MESSAGE_NEW_PSN_DESCRIPTOR:}
+      old-domain-path: ${KAFKA_MESSAGE_OLD_DOMAIN_DESCRIPTOR:}
+      new-domain-path: ${KAFKA_MESSAGE_NEW_DOMAIN_DESCRIPTOR:}
+  recovery:
+    dlt-topic: ${KAFKA_DLT_TOPIC:}
+    review-topic: ${KAFKA_REVIEW_TOPIC:}
+    max-attempts: ${RECOVERY_MAX_ATTEMPTS:3}
+    initial-backoff: ${RECOVERY_INITIAL_BACKOFF:1s}
+    probe-interval: ${RECOVERY_PROBE_INTERVAL:15s}
+  statistics:
+    # Disabled by default because each sample makes authenticated backend requests
+    enabled: ${CONNECTOR_STATISTICS_ENABLED:false}
+    interval: ${CONNECTOR_STATISTICS_INTERVAL:10s}
+    output-directory: ${CONNECTOR_STATISTICS_OUTPUT_DIRECTORY:statistics}
+    max-file-age: ${CONNECTOR_STATISTICS_MAX_FILE_AGE:1d}
+    max-file-size: ${CONNECTOR_STATISTICS_MAX_FILE_SIZE:256MB}

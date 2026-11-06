@@ -1,0 +1,9 @@
+services:
+  trustdeck-kafka-connector:
+    networks:
+      - trustdeck
+
+networks:
+  trustdeck:
+    external: true
+    name: trustdeck

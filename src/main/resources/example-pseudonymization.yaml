@@ -1,0 +1,25 @@
+# Synthetic/example mapping only. These names are not production schema requirements.
+connector:
+  operation: CREATE_PSEUDONYM
+  source-topic: sample-trustdeck-input
+  group-id: sample-trustdeck-connector
+  statistics:
+    enabled: false
+    interval: 10s
+    output-directory: statistics
+    max-file-age: 1d
+    max-file-size: 256MB
+  trustdeck:
+    service-url: https://trustdeck.example.invalid
+    token-endpoint: https://keycloak.example.invalid/realms/trustdeck/protocol/openid-connect/token
+    client-id: replace-me
+    client-secret: replace-me
+  mapping:
+    common:
+      domain-path: /source_domain
+      identifier-path: /identifier
+      id-type-path: /type_of_identifier
+      psn-path: /pseudonym
+      valid-from-path: /timestamp
+      source-timezone: Europe/Berlin
+      datetime-format: uuuu-MM-dd HH:mm:ss.SSS
