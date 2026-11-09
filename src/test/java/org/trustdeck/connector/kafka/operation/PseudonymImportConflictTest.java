@@ -153,7 +153,7 @@ class PseudonymImportConflictTest {
     }
 
     private MappedMessage message() {
-        return new MappedMessage("datalake", "id-1", "patient_number", "psn-1", null, null,
+        return new MappedMessage("test-domain", "id-1", "patient_number", "psn-1", null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null);
     }
 

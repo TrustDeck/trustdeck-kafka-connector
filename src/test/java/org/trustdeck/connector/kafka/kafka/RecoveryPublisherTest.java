@@ -90,7 +90,7 @@ class RecoveryPublisherTest {
         when(template.send(eq("source.review"), eq(null), anyString())).thenReturn(CompletableFuture.completedFuture(
                 new SendResult<>(null, new RecordMetadata(new TopicPartition("source.review", 0), 0, 0, 0, 0, 0))));
         ConsumerRecord<byte[], byte[]> record = new ConsumerRecord<>("source", 0, 3, null, new byte[] {1});
-        MappedMessage mapped = new MappedMessage("datalake", "identifier", "type", "psn", null, null,
+        MappedMessage mapped = new MappedMessage("test-domain", "identifier", "type", "psn", null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null);
 
         new RecoveryPublisher(template, properties, mapper).publishConflict(record, mapped, new PseudonymConflictException(
@@ -103,7 +103,7 @@ class RecoveryPublisherTest {
         assertEquals("PENDING_CONFLICT_REVIEW", envelope.get("status").asText());
         assertEquals("PSEUDONYM_CONFLICT_IDENTIFIER_HAS_OTHER_PSEUDONYM", envelope.get("failureCategory").asText());
         assertEquals(422, envelope.get("httpStatus").asInt());
-        assertEquals("datalake", envelope.get("resolvedTarget").asText());
+        assertEquals("test-domain", envelope.get("resolvedTarget").asText());
     }
 
     /** Ensures a failed producer confirmation prevents recovery publication from being treated as complete. */

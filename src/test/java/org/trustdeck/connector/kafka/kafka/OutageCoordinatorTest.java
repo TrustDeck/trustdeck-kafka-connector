@@ -63,7 +63,7 @@ class OutageCoordinatorTest {
         OutageCoordinator coordinator = new OutageCoordinator(state, registry, mock(TrustDeckPreflight.class),
                 mock(NotificationService.class), Duration.ZERO);
 
-        coordinator.pause("BACKEND_UNAVAILABLE", "ishmed", null, "project");
+        coordinator.pause("BACKEND_UNAVAILABLE", "test-domain", null, "project");
         coordinator.probeAndResume();
 
         verify(container).pause();
@@ -83,7 +83,7 @@ class OutageCoordinatorTest {
         OutageCoordinator coordinator = new OutageCoordinator(state, registry, preflight,
                 mock(NotificationService.class), Duration.ofMinutes(1));
 
-        coordinator.pause("BACKEND_UNAVAILABLE", "ishmed", null, "project");
+        coordinator.pause("BACKEND_UNAVAILABLE", "test-domain", null, "project");
         coordinator.probeAndResume();
 
         verify(preflight, never()).verifyStaticResources();
