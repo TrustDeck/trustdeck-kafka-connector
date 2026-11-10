@@ -36,10 +36,10 @@ class JsonMessageMapperTest {
         ConnectorProperties properties = properties();
         JsonMessageMapper mapper = new JsonMessageMapper(properties);
 
-        MappedMessage mapped = mapper.map("{\"value\":\"0123456789\",\"type\":\"case_number\",\"domain\":\"datalake\",\"time\":\"2025-10-09 21:08:10.175\",\"validity\":\"1d\"}".getBytes());
+        MappedMessage mapped = mapper.map("{\"value\":\"0123456789\",\"type\":\"case_number\",\"domain\":\"test-domain\",\"time\":\"2025-10-09 21:08:10.175\",\"validity\":\"1d\"}".getBytes());
 
         assertEquals("0123456789", mapped.identifier());
-        assertEquals("datalake", mapped.domain());
+        assertEquals("test-domain", mapped.domain());
         assertEquals(LocalDateTime.of(2025, 10, 9, 19, 8, 10, 175_000_000), mapped.validFrom());
         assertEquals("1d", mapped.validityTime());
     }
