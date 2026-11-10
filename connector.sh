@@ -53,6 +53,8 @@ Actions:
   progress [since-ms] [seconds]
            - Measure throughput over [seconds] (default 60), estimate the remaining time, and
              count DLT/review entries since [since-ms] (default: container start).
+             Uses a local Kafka CLI (kafka-consumer-groups[.sh]) for the consumer lag and falls
+             back to a disposable apache/kafka container, which is removed on exit.
              Needs kcat, jq, and keytool on the host for the recovery-topic counts.
 
 Environment:
@@ -286,14 +288,68 @@ export_ca_certificates() {
       done
 }
 
+# Temporary files and containers removed when the script exits, also on Ctrl-C or errors
+CLEANUP_FILES=()
+CLEANUP_CONTAINERS=()
+
+cleanup() {
+  local file container
+  for container in "${CLEANUP_CONTAINERS[@]}"; do
+    docker_cmd rm -f "$container" >/dev/null 2>&1 || true
+  done
+  for file in "${CLEANUP_FILES[@]}"; do
+    shred -u "$file" 2>/dev/null || rm -f "$file"
+  done
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+# Finds a locally installed Kafka CLI (archive installs ship kafka-consumer-groups.sh, packages kafka-consumer-groups)
+local_kafka_cli() {
+  command -v kafka-consumer-groups.sh 2>/dev/null || command -v kafka-consumer-groups 2>/dev/null || true
+}
+
+# Writes the Kafka admin client configuration; the truststore path differs between host and container
+write_admin_properties() {
+  local file="$1"
+  local truststore="$2"
+  cat > "$file" <<EOF
+security.protocol=${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+sasl.mechanism=${KAFKA_SASL_MECHANISM:-PLAIN}
+sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
+ssl.truststore.location=$truststore
+ssl.truststore.password=${KAFKA_TRUSTSTORE_PASSWORD}
+ssl.truststore.type=${KAFKA_TRUSTSTORE_TYPE:-JKS}
+EOF
+}
+
+# Describes the consumer group with the local Kafka CLI, or with a disposable container if none is installed.
+# The caller registers the container name in CLEANUP_CONTAINERS beforehand: this function runs in a subshell,
+# so a name registered here would not reach the cleanup on exit.
+describe_group() {
+  local props="$1"
+  local name="$2"
+  local cli
+  cli="$(local_kafka_cli)"
+
+  if [[ -n "$cli" ]]; then
+    "$cli" --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" --command-config "$props" \
+      --describe --group "$KAFKA_GROUP_ID" 2>/dev/null
+    return 0
+  fi
+
+  docker_cmd run --rm --name "$name" --user "$(id -u):$(id -g)" -v "$props:/tmp/admin.properties:ro" \
+    -v "$ROOT_DIR/config/instance/truststores:/truststores:ro" apache/kafka:3.9.1 \
+    /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" \
+    --command-config /tmp/admin.properties --describe --group "$KAFKA_GROUP_ID" 2>/dev/null
+}
+
 # Sums committed offset, log end, and lag over all partitions of the source topic
 group_offsets() {
   local props="$1"
   local topic="$2"
-  docker_cmd run --rm --user "$(id -u):$(id -g)" -v "$props:/tmp/admin.properties:ro" \
-    -v "$ROOT_DIR/config/instance/truststores:/truststores:ro" apache/kafka:3.9.1 \
-    /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" \
-    --command-config /tmp/admin.properties --describe --group "$KAFKA_GROUP_ID" 2>/dev/null \
+  local name="$3"
+  describe_group "$props" "$name" \
   | awk -v t="$topic" '$2 == t {c += $4; e += $5; l += $6} END {printf "%d %d %d\n", c, e, l}'
 }
 
@@ -317,24 +373,29 @@ progress() {
   fi
 
   # Temporary Kafka client configuration; contains the password and is removed on exit
-  local props
+  local props truststore_name
   props="$(umask 077; mktemp /tmp/kafka-admin.XXXXXX.properties)"
-  # shellcheck disable=SC2064
-  trap "shred -u '$props' 2>/dev/null || rm -f '$props'" EXIT
-  cat > "$props" <<EOF
-security.protocol=${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
-sasl.mechanism=${KAFKA_SASL_MECHANISM:-PLAIN}
-sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
-ssl.truststore.location=/truststores/$(basename "$KAFKA_TRUSTSTORE_LOCATION")
-ssl.truststore.password=${KAFKA_TRUSTSTORE_PASSWORD}
-ssl.truststore.type=${KAFKA_TRUSTSTORE_TYPE:-JKS}
-EOF
+  CLEANUP_FILES+=("$props")
+  truststore_name="$(basename "$KAFKA_TRUSTSTORE_LOCATION")"
+  if [[ -n "$(local_kafka_cli)" ]]; then
+    echo "Using the local Kafka CLI: $(local_kafka_cli)"
+    write_admin_properties "$props" "$ROOT_DIR/config/instance/truststores/$truststore_name"
+  else
+    echo "No local Kafka CLI found; using a disposable apache/kafka container."
+    write_admin_properties "$props" "/truststores/$truststore_name"
+    # Pull up front so a download does not distort the first measurement
+    docker_cmd image inspect apache/kafka:3.9.1 >/dev/null 2>&1 || docker_cmd pull -q apache/kafka:3.9.1 >/dev/null
+  fi
+
+  # Container names for the fallback, registered here in the main shell so the cleanup can remove them
+  local first="connector-progress-$$-1" second="connector-progress-$$-2"
+  CLEANUP_CONTAINERS+=("$first" "$second")
 
   echo "=== Progress of group '$KAFKA_GROUP_ID' on '$topic' (measuring for ${interval}s) ..."
   local c1 c2 e2 l2 t1 t2
-  read -r c1 _ _ < <(group_offsets "$props" "$topic"); t1=$(date +%s)
+  read -r c1 _ _ < <(group_offsets "$props" "$topic" "$first"); t1=$(date +%s)
   sleep "$interval"
-  read -r c2 e2 l2 < <(group_offsets "$props" "$topic"); t2=$(date +%s)
+  read -r c2 e2 l2 < <(group_offsets "$props" "$topic" "$second"); t2=$(date +%s)
   awk -v c1="$c1" -v c2="$c2" -v e="$e2" -v l="$l2" -v s=$((t2 - t1)) 'BEGIN {
     if (e == 0) { print "No offsets found; is KAFKA_GROUP_ID correct?"; exit }
     r = (c2 - c1) / s
@@ -352,8 +413,7 @@ EOF
   else
     local ca
     ca="$(umask 077; mktemp /tmp/kafka-ca.XXXXXX.pem)"
-    # shellcheck disable=SC2064
-    trap "shred -u '$props' 2>/dev/null || rm -f '$props'; rm -f '$ca'" EXIT
+    CLEANUP_FILES+=("$ca")
     export_ca_certificates "$ROOT_DIR/config/instance/truststores/$(basename "$KAFKA_TRUSTSTORE_LOCATION")" > "$ca"
     if [[ ! -s "$ca" ]]; then
       echo "Could not export any certificate from the Kafka truststore; check KAFKA_TRUSTSTORE_LOCATION and its password."
