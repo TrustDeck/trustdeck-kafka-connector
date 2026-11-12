@@ -1,5 +1,6 @@
 services:
   trustdeck-kafka-connector:
+    container_name: trustdeck-kafka-connector
     build:
       context: ..
       dockerfile: docker/Dockerfile
