@@ -1,6 +1,7 @@
 services:
   trustdeck-kafka-connector:
-    container_name: trustdeck-kafka-connector
+    # Named after the Compose project, so instances started with different CONNECTOR_PROJECT values do not collide
+    container_name: ${COMPOSE_PROJECT_NAME:-trustdeck-kafka-connector}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -16,7 +17,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 45s
     env_file:
-      - path: ../.env
+      # connector.sh sets CONNECTOR_ENV_FILE to the instance's environment file
+      - path: ${CONNECTOR_ENV_FILE:-../.env}
         required: false
     environment:
       TZ: UTC
