@@ -30,10 +30,6 @@ NETWORK_COMPOSE="$ROOT_DIR/docker/compose.trustdeck-network.yaml"
 PROJECT="${CONNECTOR_PROJECT:-trustdeck-kafka-connector}"
 SERVICE="trustdeck-kafka-connector"
 
-# Earlier deployments ran "docker compose" from docker/ without a project name, so Compose
-# named the project "docker". That name collides with other stacks started from a docker/ directory.
-LEGACY_PROJECT="docker"
-
 # UID of the "connector" user inside the image (see docker/Dockerfile)
 CONTAINER_UID=10001
 
@@ -163,22 +159,6 @@ ensure_statistics_dir() {
   fi
 }
 
-# Stops a container from the old "docker" project so it does not consume in parallel with the new one
-stop_legacy_container() {
-  [[ "$PROJECT" == "$LEGACY_PROJECT" ]] && return 0
-
-  local legacy=()
-  mapfile -t legacy < <(docker_cmd ps -aq \
-    --filter "label=com.docker.compose.project=$LEGACY_PROJECT" \
-    --filter "label=com.docker.compose.service=$SERVICE")
-
-  if [[ ${#legacy[@]} -gt 0 ]]; then
-    echo "Removing connector container from the previous project name '$LEGACY_PROJECT' ..."
-    docker_cmd stop -t 45 "${legacy[@]}" >/dev/null
-    docker_cmd rm "${legacy[@]}" >/dev/null
-  fi
-}
-
 # Waits for the Docker health check, which calls the readiness endpoint
 wait_for_ready() {
   # Up to 36 checks, 5 seconds apart (3 minutes)
@@ -229,7 +209,6 @@ start() {
   [[ "$MODE" == "trustdeck" ]] && check_trustdeck_network
   ensure_statistics_dir
   build
-  stop_legacy_container
 
   echo "Starting the connector (project '$PROJECT', setup '$MODE') ..."
   compose up -d

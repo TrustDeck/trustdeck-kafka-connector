@@ -59,8 +59,8 @@ public record MappedMessage(String domain, String identifier, String idType, Str
 	/**
 	 * Creates a mapped message without a pseudonym validity duration.
 	 *
-	 * This constructor preserves compatibility for callers that provide validity
-	 * start and end values but do not map {@code validityTime}.
+	 * Intended for callers that provide validity start and end values but do not
+	 * map {@code validityTime}.
 	 *
 	 * @param domain resolved TrustDeck domain
 	 * @param identifier resolved pseudonym identifier
