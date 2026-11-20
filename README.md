@@ -1,148 +1,223 @@
 # TrustDeck Kafka Connector
 
-This Apache-2.0 application consumes one Kafka topic with one configured operation and calls TrustDeck through its Java client. It does not create projects, entity types, domains, schemas, permissions, consumer groups, or recovery-topic consumers.
+Version 1.0.0
 
-## Run
+The TrustDeck Kafka Connector consumes one Kafka topic, applies one configured operation to every record, and calls TrustDeck through the [TrustDeck Java client](https://central.sonatype.com/artifact/org.trustdeck/client). It does not create projects, entity types, domains, schemas, permissions, consumer groups, or recovery-topic consumers; these must exist beforehand.
 
-Prerequisites are Java 21, Maven 3.8.7 (the verified host version; Maven 3.x with the same POM/plugin compatibility is supported), Docker/Compose, Kafka ACLs, and an existing TrustDeck project/type/domain. The Docker builder supplies Maven 3.9.11 explicitly. Use TrustDeck backend v2.5.0 or newer. Use a confidential Keycloak client with service accounts and client-credentials access. Since backend v2.4.0, TrustDeck only accepts access tokens whose `aud` claim contains `trustdeck`: in the Keycloak admin console, open **Clients → your client → Client scopes → your-client-dedicated**, choose **Configure a new mapper → Audience**, set **Included Client Audience** to `trustdeck`, and enable **Add to access token**. Without it, every TrustDeck request fails with 401. Grant the exact resource permissions described in the Delivery and Recovery section below; the JWT subject must be the TrustDeck service-account user's UUID. Keycloak realm-admin roles alone do not grant TrustDeck permissions.
+## Requirements
 
-The connector uses the released `org.trustdeck:client:2.0.0` package from Maven Central:
+- Java 21 and Maven 3.8.7 or newer (the Docker build uses Maven 3.9.11)
+- Docker with Compose
+- TrustDeck backend v2.5.0 or newer, with an existing project, entity type, and domain as needed by the operation
+- Kafka with ACLs for the source topic and the recovery topics
+- A confidential Keycloak client with service accounts and client-credentials access
+
+TrustDeck only accepts access tokens whose `aud` claim contains `trustdeck`. In the Keycloak admin console, open **Clients → your client → Client scopes → your-client-dedicated**, choose **Configure a new mapper → Audience**, set **Included Client Audience** to `trustdeck`, and enable **Add to access token**. Without this mapper, every TrustDeck request fails with 401. The JWT subject must be the UUID of the TrustDeck service-account user, which needs the permissions listed under [Permissions](#permissions). Keycloak realm-admin roles alone do not grant TrustDeck permissions.
+
+## Build
+
+The connector depends on `org.trustdeck:client:2.1.0` from Maven Central; no extra repository or credentials are needed.
 
 ```sh
 mvn clean verify
-```
-
-No GitHub Packages credentials or local client checkout are required. Never put credentials in the POM, image, build args, or history:
-
-```sh
 docker build --file docker/Dockerfile -t trustdeck-kafka-connector:1.0.0 .
 ```
 
-Maven does not source `.env`. In WSL:
+Never put credentials in the POM, the image, build arguments, or the Git history.
+
+Behind an HTTP proxy, export `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` (or the lowercase variants) in the shell that runs `docker compose build`. Compose passes them as build arguments; `apt-get` uses them directly, and Maven receives a temporary `settings.xml` generated from them (`docker/maven-proxy.sh`). They are not stored in the image. For a private Maven repository, pass a complete `settings.xml` instead, which takes precedence:
 
 ```sh
-vim .env
+docker build -f docker/Dockerfile --secret id=maven_settings,src=$HOME/.m2/settings.xml -t trustdeck-kafka-connector:1.0.0 .
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` and fill it in. The classpath `application.yaml` requires `TRUSTDECK_OPERATION`, `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC`, `KAFKA_GROUP_ID`, the backend and token URLs, and the service-account credentials. It contains no sample mappings. `KAFKA_USERNAME` and `KAFKA_PASSWORD` are escaped into a JAAS string when `KAFKA_SASL_JAAS_CONFIG` is absent. Truststores are mounted read-only; TLS hostname and certificate validation stay enabled.
+
+The `config/instance` directory holds deployment-specific overrides: Compose mounts its optional `application.yaml` at `/app/config/application.yaml` and its `truststores` directory read-only, and `SPRING_CONFIG_ADDITIONAL_LOCATION` imports that directory. It is not packaged into the application and contains no credentials.
+
+To run without Docker, export the environment first, since Maven does not read `.env`:
+
+```sh
 set -a
 source ./.env
 set +a
 mvn spring-boot:run
 ```
 
-The generic classpath `application.yaml` requires `TRUSTDECK_OPERATION`, `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC`, `KAFKA_GROUP_ID`, backend/token URLs, and service-account credentials. It has no sample mapping defaults. `KAFKA_USERNAME` and `KAFKA_PASSWORD` are escaped into a JAAS string when `KAFKA_SASL_JAAS_CONFIG` is absent. Truststore paths are mounted read-only; TLS hostname and certificate validation remain enabled.
+`server.shutdown: graceful` is set because the connector acknowledges records manually and publishes recovery records; graceful shutdown lets in-flight operations finish within the 45-second Compose stop grace period.
 
-The root `config/instance` directory is retained for deployment-only overrides: Compose mounts its optional `application.yaml` at `/app/config/application.yaml` and its `truststores` directory read-only, while `SPRING_CONFIG_ADDITIONAL_LOCATION` imports that directory. It is not packaged as application configuration and contains no credentials.
+## Operations
 
-The explicit `server.shutdown: graceful` setting is retained because the application owns manual acknowledgments and recovery publication; graceful Spring shutdown gives those in-flight operations time to finish during the Compose 45-second stop grace period.
+Each instance runs exactly one `TRUSTDECK_OPERATION`:
 
-### Statistics
+`CREATE_PSEUDONYM`, `UPDATE_PSEUDONYM`, `DELETE_PSEUDONYM`, `CREATE_ENTITY`, `UPDATE_ENTITY`, `DELETE_ENTITY`, `CREATE_ENTITY_AND_PSEUDONYM`
 
-Kafka record and batch counters are maintained continuously without retaining historical snapshots in memory. When enabled, TrustDeck project and system statistics are sampled at `CONNECTOR_STATISTICS_INTERVAL` and streamed into a hidden temporary file in the configured output directory. The active segment is finalized and atomically published after 24 hours, after reaching 256 MiB, or during graceful shutdown. Age and size limits are configurable, and completed rotated files are available while the connector continues running.
+Updates require explicit old selectors and use the standard endpoint, unless mapped identifier, domain, or value changes require `updateComplete`; nothing is moved or regenerated implicitly. Deletes use one exact pseudonym selector and never the domain-wide batch delete. Entity updates and deletes require a mapped TrustDeck UUID. Combined creation keeps a completed entity stage for bounded replay and never rolls it back.
 
-Daily rotation is recommended over weekly rotation for manageable file sizes and easier analysis. The size limit is a soft maximum: a segment may exceed it by at most one complete snapshot plus the small JSON-closing metadata because snapshots are never split between files. Abrupt termination can leave the current hidden temporary file incomplete; it is not published as a completed `.json` file.
-
-For a large historical import, use a one-minute sampling interval and daily rotation:
-
-```dotenv
-CONNECTOR_STATISTICS_ENABLED=true
-CONNECTOR_STATISTICS_INTERVAL=1m
-CONNECTOR_STATISTICS_OUTPUT_DIRECTORY=/app/statistics
-CONNECTOR_STATISTICS_MAX_FILE_AGE=1d
-CONNECTOR_STATISTICS_MAX_FILE_SIZE=256MB
-```
-
-Each completed segment retains the JSON fields `startedAt`, `finishedAt`, `records`, `batches`, `averageBatchMillis`, and `samples`. Segment counters and snapshot counters are relative to that segment; the listener's atomic process counters are not reset during rotation.
-
-## Permissions
-
-Grant the service-account user only the permissions required by the selected operation: `project:read`, `type:read`, and the enabled entity CRUD permissions for entity operations; `domain:read` on each configured domain; `pseudonym:create` for pseudonym creation and `pseudonym:create-batch` when batching is enabled; `pseudonym:read` and `pseudonym:delete` for exact lookup/deletion; `pseudonym:update` and `pseudonym:update-complete` when the corresponding update paths are enabled; `entity:list-pseudonyms` for combined creation; and `pseudonym:read`/`pseudonym:link` only where linked-pseudonym verification is configured. Do not grant domain/project/type creation, global administration, `entity:resolve-linkage`, `pseudonym:read-batch`, or `pseudonym:delete-batch`. Restrict DLT/review topic ACLs and retention separately.
-
-## Mappings
-
-Values are JSON Pointers, with a bare top-level name accepted as shorthand. Constant domain configuration wins over the message path. Provide only the mappings required by the selected operation. Mappings used exclusively by other operations may be omitted. Optional mappings may also be omitted. Pseudonym operations require only the fields relevant to that operation. Entity operations require a fixed project and either a fixed entity type or mapped entity-type path. Entity data uses explicit field mappings and preserves numbers, booleans, objects, arrays, and strings including leading zeros. A root array, tombstone, primitive, invalid UTF-8/JSON, trailing JSON value, oversized value, missing required path, null, blank, or wrong type is rejected.
-
-`src/main/resources/example-pseudonymization.yaml` is an opt-in synthetic example. Load it with `mvn spring-boot:run -Dspring-boot.run.arguments=--spring.config.additional-location=classpath:/example-pseudonymization.yaml`; it maps `/c_source_domain` to the domain, `/c_value` to identifier, `/c_type_of_pseudonym` to id type, `/c_pseudonym` to imported value, and `/t_timestamp` to `validFrom`. Its offset-free format is `uuuu-MM-dd HH:mm:ss.SSS` in `Europe/Berlin`; `2025-10-09 21:08:10.175` becomes UTC wall-clock `2025-10-09T19:08:10.175` on the backend wire. The file is not imported during normal startup.
-
-Supported operations are `CREATE_PSEUDONYM`, `UPDATE_PSEUDONYM`, `DELETE_PSEUDONYM`, `CREATE_ENTITY`, `UPDATE_ENTITY`, `DELETE_ENTITY`, and `CREATE_ENTITY_AND_PSEUDONYM`. Updates require explicit old selectors and use the standard endpoint unless mapped identifier/domain/value changes require `updateComplete`; nothing moves or regenerates implicitly. Deletes use one exact pseudonym selector and never the domain-wide delete batch. Entity update/delete require a mapped TrustDeck UUID. Combined creation preserves the completed entity stage for bounded replay and never rolls it back.
-
-### Operation Configuration
-
-Each instance has one fixed `TRUSTDECK_OPERATION`. The following settings are the minimum operation-specific mappings; common Kafka, URL, OAuth, and recovery settings remain required.
+The table lists the minimum operation-specific settings; the common Kafka, URL, OAuth, and recovery settings are always required.
 
 | Operation | Required settings | Optional or additional settings |
 |---|---|---|
 | `CREATE_PSEUDONYM` | `TRUSTDECK_DOMAIN` or `KAFKA_MESSAGE_SOURCE_SYSTEM_DESCRIPTOR`; identifier and id-type descriptors | Pseudonym value, validity, and timestamp settings |
 | `UPDATE_PSEUDONYM` | Domain as above; identifier and id-type descriptors; old identifier and old id-type descriptors | New identifier/type/value, old/new domain, validity, and provenance mappings |
 | `DELETE_PSEUDONYM` | Pseudonym descriptor, or identifier plus id-type descriptors | Domain as above |
-| `CREATE_ENTITY` | `TRUSTDECK_PROJECT`; fixed or mapped entity type | `mapping.common.entity-fields` in instance YAML supplies entity data |
-| `UPDATE_ENTITY` | Entity settings above; entity ID descriptor | `mapping.common.entity-fields` supplies replacement data; per-field `required` and `constant` rules |
+| `CREATE_ENTITY` | `TRUSTDECK_PROJECT`; fixed or mapped entity type | `connector.mapping.common.entity-fields` in the instance YAML supplies entity data |
+| `UPDATE_ENTITY` | Entity settings above; entity ID descriptor | `connector.mapping.common.entity-fields` supplies replacement data; per-field `required` and `constant` rules |
 | `DELETE_ENTITY` | Entity settings above; entity ID descriptor | No entity field mappings are needed |
-| `CREATE_ENTITY_AND_PSEUDONYM` | Entity settings above; domain | `mapping.common.entity-fields` supplies entity data; pseudonym value, validity, and provenance mappings |
+| `CREATE_ENTITY_AND_PSEUDONYM` | Entity settings above; domain | `connector.mapping.common.entity-fields` supplies entity data; pseudonym value, validity, and provenance mappings |
 
-The descriptor environment variables are the `KAFKA_MESSAGE_*_DESCRIPTOR` entries in `.env.example`; common mappings are under `connector.mapping.common` and update selectors/replacements are under `connector.mapping.update-pseudonym`. `TRUSTDECK_PROJECT` and `TRUSTDECK_ENTITY_TYPE` are ignored for pseudonym-only operations. A nonblank `TRUSTDECK_DOMAIN` overrides the domain message mapping. Entity field mappings are YAML list entries under `connector.mapping.common`, not environment variables.
+## Mappings
 
-### Mapping Migration
+The descriptor variables are the `KAFKA_MESSAGE_*_DESCRIPTOR` entries in `.env.example`. Common mappings bind to `connector.mapping.common`, update selectors and replacements to `connector.mapping.update-pseudonym`. Entity field mappings are YAML list entries under `connector.mapping.common.entity-fields`, not environment variables.
 
-| Old property | New property |
-|---|---|
-| `connector.mapping.domain-constant` through `datetime-format` | `connector.mapping.common.<property>` |
-| `connector.mapping.old-*` and `new-*` | `connector.mapping.update-pseudonym.<property>` |
-| `connector.mapping.entity-fields` | `connector.mapping.common.entity-fields` |
+Mapping values are JSON Pointers; a bare top-level name is accepted as shorthand. Only the mappings required by the selected operation are needed; others may be omitted. A nonblank `TRUSTDECK_DOMAIN` takes precedence over the domain message mapping. `TRUSTDECK_PROJECT` and `TRUSTDECK_ENTITY_TYPE` are ignored for pseudonym-only operations. Entity operations require a fixed project and either a fixed or mapped entity type. Entity data preserves numbers, booleans, objects, arrays, and strings, including leading zeros.
 
-Environment variable names are unchanged; only their YAML binding paths are regrouped. Do not retain the old YAML paths in new instance files.
+A record is rejected if it is a tombstone, a root array or primitive, invalid UTF-8 or JSON, has a trailing JSON value, is oversized, or a required path is missing, null, blank, or of the wrong type.
+
+`src/main/resources/example-pseudonymization.yaml` is an opt-in synthetic example that is not loaded during normal startup:
+
+```sh
+mvn spring-boot:run -Dspring-boot.run.arguments=--spring.config.additional-location=classpath:/example-pseudonymization.yaml
+```
+
+It maps `/c_source_domain` to the domain, `/c_value` to the identifier, `/c_type_of_pseudonym` to the id type, `/c_pseudonym` to the imported value, and `/t_timestamp` to `validFrom`. Timestamps use the offset-free format `uuuu-MM-dd HH:mm:ss.SSS` in `Europe/Berlin`; `2025-10-09 21:08:10.175` is sent to the backend as the UTC wall-clock time `2025-10-09T19:08:10.175`.
+
+## Permissions
+
+Grant the service-account user only what the selected operation needs:
+
+- `project:read` and `type:read`, plus the enabled entity CRUD permissions, for entity operations
+- `domain:read` on each configured domain
+- `pseudonym:create` for pseudonym creation, and `pseudonym:create-batch` when batching is enabled
+- `pseudonym:read` and `pseudonym:delete` for exact lookup and deletion; `pseudonym:read` is also needed to explain rejected imports
+- `pseudonym:update` and `pseudonym:update-complete` when the corresponding update paths are enabled
+- `entity:list-pseudonyms` for combined creation
+- `pseudonym:read` and `pseudonym:link` only where linked-pseudonym verification is configured
+
+Do not grant domain, project, or type creation, global administration, `entity:resolve-linkage`, `pseudonym:read-batch`, or `pseudonym:delete-batch`. Restrict DLT and review topic ACLs and retention separately.
 
 ## Delivery and Recovery
 
-Auto-commit is disabled. A source offset is acknowledged only after the TrustDeck call succeeds or a DLT/review envelope is broker-confirmed. DLT defaults to `<source>.DLT`; linkage review defaults to `<source>.REVIEW`; all three names must differ. DLT/review records retain base64 original key/value bytes, source coordinates, selected safe metadata, operation, target, sanitized category, attempts, and completed stage. They never contain tokens, passwords, cookies, arbitrary headers, or raw logs. Restrict topic ACLs and retention because business payloads may be sensitive.
+Auto-commit is disabled. A source offset is acknowledged only after the TrustDeck call succeeds or a DLT or review record has been confirmed by the broker. The DLT defaults to `<source>.DLT` and the linkage review topic to `<source>.REVIEW`; all three topic names must differ. Recovery records contain the base64-encoded original key and value, source coordinates, selected safe metadata, operation, target, sanitized failure category, attempts, and completed stage. They never contain tokens, passwords, cookies, arbitrary headers, or raw logs. Restrict topic ACLs and retention, since business payloads may be sensitive.
 
-HTTP calls use finite client timeouts. Record mapping failures go directly to DLT. Transient operation failures use bounded retries. A definitive client error (4xx except 401/403/408/429) is not retried and goes to DLT as `REJECTED_BY_TRUSTDECK`. A true client `RecordLinkageConflictException` goes to review as `PENDING_LINKAGE_REVIEW`.
+HTTP calls use finite client timeouts. Mapping failures go directly to the DLT. Transient failures are retried a bounded number of times. A definitive client error (4xx except 401, 403, 408, and 429) is not retried and goes to the DLT as `REJECTED_BY_TRUSTDECK`. A `RecordLinkageConflictException` from the client goes to review as `PENDING_LINKAGE_REVIEW`.
 
-For imported pseudonyms (`CREATE_PSEUDONYM` with a mapped psn), TrustDeck answers an exact duplicate with 200 and every other rejection with a body-less 422. The connector explains a 422 by looking up the pseudonym and the identifier in the target domain (requires `pseudonym:read`): an identical existing mapping counts as success, a contradicting one goes to review with status `PENDING_CONFLICT_REVIEW` and category `PSEUDONYM_CONFLICT_IDENTIFIER_HAS_OTHER_PSEUDONYM` or `PSEUDONYM_CONFLICT_PSEUDONYM_ASSIGNED_ELSEWHERE`, and anything else stays `REJECTED_BY_TRUSTDECK`. Since backend v2.5.0, a supplied pseudonym is never replaced: one that is already taken is answered with 422, also in domains with a random algorithm, and the same pair can be imported into several domains. Older backends replaced a taken pseudonym in random-algorithm domains with a generated one, and rejected a pair that already existed in another domain without a lookup in the target domain being able to explain it. Each poll is split into batches of consecutive records with the same partition, domain, and validity settings, up to `TRUSTDECK_BATCH_SIZE`; one consumer per partition (`KAFKA_CONCURRENCY` equal to the partition count) keeps these batches as large as `KAFKA_MAX_POLL_RECORDS`. A batch request reports duplicates and conflicts only by omitting them (206) or rejecting the whole batch when nothing was created (422); every record a batch did not confirm is therefore processed individually. TrustDeck answers 403 for a domain that does not exist, so a missing or unauthorized domain pauses consumption; the log names the domain, and consumption resumes once it exists and is readable. Review publication is terminal only after confirmation. There is no exactly-once HTTP claim. The crash window is after a successful TrustDeck call or confirmed recovery publication but before the source offset commit; a restart can perform the HTTP effect or publication again. Use source topic/partition/offset for downstream deduplication. Do not blindly replay an envelope to the normal listener.
+For imported pseudonyms (`CREATE_PSEUDONYM` with a mapped pseudonym), TrustDeck answers an exact duplicate with 200 and every other rejection with a body-less 422. A supplied pseudonym is never replaced: one that is already taken is rejected, also in domains with a random algorithm, and the same pair can be imported into several domains. The connector explains a 422 by looking up the pseudonym and the identifier in the target domain:
+
+- an identical existing mapping counts as success;
+- a contradicting mapping goes to review with status `PENDING_CONFLICT_REVIEW` and category `PSEUDONYM_CONFLICT_IDENTIFIER_HAS_OTHER_PSEUDONYM` or `PSEUDONYM_CONFLICT_PSEUDONYM_ASSIGNED_ELSEWHERE`;
+- anything else stays `REJECTED_BY_TRUSTDECK`.
+
+Each poll is split into batches of consecutive records with the same partition, domain, and validity settings, up to `TRUSTDECK_BATCH_SIZE`. One consumer per partition (`KAFKA_CONCURRENCY` equal to the partition count) keeps batches as large as `KAFKA_MAX_POLL_RECORDS`. A batch request reports duplicates and conflicts only by omitting them (206) or by rejecting the whole batch when nothing was created (422), so every record not confirmed by a batch is processed individually.
+
+TrustDeck answers 403 for a domain that does not exist, so a missing or unauthorized domain pauses consumption; the log names the domain, and consumption resumes once the domain exists and is readable. During an outage the connector pauses consumption instead of draining records to the DLT; the readiness indicator reports the pause while liveness stays up. Docker restart policies do not restart an unhealthy but running container, so an external watchdog must not undo intentional pauses with a restart loop.
+
+There is no exactly-once guarantee for HTTP effects. If the connector stops after a successful TrustDeck call or recovery publication but before the offset commit, the effect or publication may happen again after a restart. Use the source topic, partition, and offset for downstream deduplication, and never replay a recovery record blindly through the normal listener.
+
+### Notifications
+
+Optional mail notifications use Spring Boot's standard `spring.mail.*` settings, plus the connector-specific `SMTP_FROM`, `SMTP_TO`, `SUBJECT_PREFIX`, and `SMTP_COOLDOWN`. `SMTP_TO` is empty by default, which disables mail entirely. An unauthenticated relay needs only host and port; authenticated SMTP additionally needs username, password, and `SMTP_AUTH=true`. A mail failure never acknowledges data.
 
 ### Manual Replay
 
-Manual replay is an explicit operator procedure. For a controlled administrative process, set `CONNECTOR_REPLAY_ENABLED=true`, restrict `/internal/replay` to the operator network, and POST the complete recovery envelope JSON to `POST /internal/replay`. The endpoint decodes and uses the envelope's preserved `valueBase64`; caller-supplied replacement bytes are not accepted. First stop or isolate the normal source consumer, preserve the envelope, and confirm that its `status` is `FAILED_DLT`, its `operation` and `resolvedTarget` match the instance being used, and its `failureCategory` is not `UNKNOWN_OUTCOME`. Do not replay `PENDING_LINKAGE_REVIEW` until linkage has been reconciled.
+Manual replay is an explicit operator procedure. Set `CONNECTOR_REPLAY_ENABLED=true`, restrict `/internal/replay` to the operator network, and POST the complete recovery envelope JSON to it. The endpoint uses the envelope's preserved `valueBase64`; replacement bytes are not accepted.
 
-For a non-HTTP controlled tool, decode those original bytes to a dedicated replay process with the same operation and mapping configuration, a distinct consumer group, and restricted ACLs. Monitor the replay result and retain the recovery record separately; never point a replay instance at the production source topic. For `CREATE_ENTITY_AND_PSEUDONYM`, replay is valid only when the envelope has `completedStage: ENTITY_CREATED` and `completedUuid`; the endpoint restores that UUID and runs stage two, or rejects the envelope. Ordinary republishing cannot carry this metadata by itself, so it must not be used for combined replay.
+Before replaying, stop or isolate the normal source consumer, keep a copy of the envelope, and confirm that its `status` is `FAILED_DLT`, its `operation` and `resolvedTarget` match the instance, and its `failureCategory` is not `UNKNOWN_OUTCOME`. Do not replay `PENDING_LINKAGE_REVIEW` until the linkage has been reconciled.
 
-Production outage handling must pause consumption rather than drain records to DLT; the readiness health indicator reports a pause while liveness remains up. SMTP transport uses Spring Boot's standard `spring.mail.*` settings. Connector-specific `SMTP_FROM`, `SMTP_TO`, `SUBJECT_PREFIX`, and `SMTP_COOLDOWN` remain separate; `SMTP_TO` is empty by default, so mail is optional and no connection attempt occurs. An unauthenticated relay needs only host/port; authenticated SMTP additionally needs username/password and `SMTP_AUTH=true`. Mail failure never acknowledges data. The current minimal listener retains uncommitted data on failed publication. Docker restart policies do not restart an unhealthy-but-running container, so use an external watchdog carefully and do not erase intentional pauses with a restart loop.
+For `CREATE_ENTITY_AND_PSEUDONYM`, replay is only valid when the envelope has `completedStage: ENTITY_CREATED` and a `completedUuid`; the endpoint restores that UUID and runs the second stage, or rejects the envelope. Plain republishing cannot carry this metadata and must not be used for combined operations.
 
-## Kafka and Deployment
+A non-HTTP replay tool must use a dedicated process with the same operation and mapping configuration, a distinct consumer group, and restricted ACLs, and must never point at the production source topic.
 
-Start new groups at `earliest`; existing committed offsets take precedence. Inspect and reset offsets only with the consumer stopped, and never reset the production group during development. Conservative defaults are concurrency 2, 100 poll records, 100-record/256 KiB batch limits, 5-second connect timeout, 30-second read timeout, and three retries. Tune `max.poll.interval.ms` above the worst sequential HTTP and retry budget, or lower poll size. Instances sharing a group divide partitions; independent mappings or operations require distinct groups or they will double-process or omit work.
+## Running with Docker
 
-`connector.sh` wraps the Compose calls. `standalone` uses only the base file, `trustdeck` adds the overlay that joins the external `trustdeck` network, so `.env` can address `trustdeck-backend` and `trustdeck-keycloak` by container name. `start` checks `.env` and the instance files, prepares the statistics directory, builds the image, recreates the container, and waits for readiness; `stop`, `restart`, `logs`, and `build` do what they say. `status` also prints the last pause and recovery events, which name the cause and, for TrustDeck failures, the domain. `progress [since-ms] [seconds]` measures throughput, estimates the remaining time from the consumer lag, and counts DLT and review entries. It reads the consumer lag with a locally installed Kafka CLI (`kafka-consumer-groups.sh` or `kafka-consumer-groups`) and falls back to a disposable `apache/kafka` container, which is removed on exit, also when interrupted; the DLT and review counts need `kcat`, `jq`, and `keytool` on the host. Set `CONNECTOR_PROJECT` to run several instances side by side (default project: `trustdeck-kafka-connector`); the container is named after the project. Instances started from the same checkout also need their own environment file: copy `.env.example` to, for example, `connector-b.env` (a name ending in `.env` keeps it out of Git and the image build context), and pass it as `CONNECTOR_ENV_FILE` (default `.env`; relative paths are resolved against the current directory). Each file needs its own `HEALTH_HOST_PORT` (default 18080), `STATISTICS_HOST_DIR`, `KAFKA_GROUP_ID` (unless the instances should share the topic's partitions), and its own source and mapping settings. The truststores and `config/instance/application.yaml` are shared by all instances of a checkout. A container left over from the former implicit project name `docker` is stopped and removed on start.
+`connector.sh` wraps the Compose calls. `standalone` uses only the base Compose file; `trustdeck` adds an overlay that joins the existing external `trustdeck` network, so `.env` can address `trustdeck-backend` and `trustdeck-keycloak` by container name.
+
+| Command | Effect |
+|---|---|
+| `start` | Checks `.env` and the instance files, prepares the statistics directory, builds the image, recreates the container, and waits for readiness |
+| `stop`, `restart`, `logs`, `build` | As named |
+| `status` | Container status plus the last pause and recovery events, including the cause and, for TrustDeck failures, the domain |
+| `progress [since-ms] [seconds]` | Throughput, estimated remaining time from the consumer lag, and DLT and review counts |
+
+`progress` reads the consumer lag with a local Kafka CLI (`kafka-consumer-groups.sh` or `kafka-consumer-groups`) and otherwise uses a disposable `apache/kafka` container that is removed on exit. The DLT and review counts need `kcat`, `jq`, and `keytool` on the host.
 
 ```sh
-  ./connector.sh trustdeck start
-  ./connector.sh trustdeck logs
-  CONNECTOR_PROJECT=trustdeck-connector-b ./connector.sh standalone start
-  CONNECTOR_PROJECT=trustdeck-kafka-connector-c CONNECTOR_ENV_FILE=connector-c.env ./connector.sh trustdeck start
+./connector.sh trustdeck start
+./connector.sh trustdeck logs
 ```
 
-The equivalent plain Compose calls are (set `CONNECTOR_ENV_FILE` to the same file as `--env-file` for any file other than `.env`):
+The equivalent plain Compose call is:
 
 ```sh
-  docker compose --env-file .env -p trustdeck-connector-a -f docker/compose.yaml up -d
-  docker compose --env-file .env -p trustdeck-connector-b -f docker/compose.yaml -f docker/compose.trustdeck-network.yaml up -d
-  CONNECTOR_ENV_FILE=$PWD/connector-c.env docker compose --env-file connector-c.env -p trustdeck-kafka-connector-c -f docker/compose.yaml up -d
+docker compose --env-file .env -p trustdeck-kafka-connector -f docker/compose.yaml -f docker/compose.trustdeck-network.yaml up -d
 ```
 
-The console log uses the TrustDeck backend format (`[LEVEL]<tab>yyyy-MM-dd HH:mm:ss,SSS Class:line message`, see `logback-spring.xml`). Third-party libraries log warnings only; set `LOGGING_LEVEL_ROOT=INFO` to see Kafka client details, and `LOG_COLORS=never` for log collectors without ANSI support. A statistics sample that keeps failing is logged at WARN once and then at DEBUG.
+The base Compose file needs only an `.env`, the read-only instance YAML and truststore mounts, and a free health port. Health is exposed only at `/actuator/health/readiness` and `/actuator/health/liveness`. Use HTTPS URLs for the backend and Keycloak.
 
-Each statistics sample contains the connector's own counters (records, polls, average poll duration) and the TrustDeck project and system statistics. With client 2.1.0 the connector requests the cheap variant of these endpoints: table row counts are PostgreSQL estimates (`recordCountExact: false`) with a running insert counter per table (`insertedRecordCount`), and project entity and pseudonym counts are `null`. The backend therefore does not scan its largest tables on every sample, which keeps short intervals usable during bulk imports; insert rates follow from the difference between two samples.
+### Several Instances
 
-Statistics files are written to `/app/statistics`, which is mounted from `STATISTICS_HOST_DIR` (default `statistics/` in the repository root) so they survive container recreation. The directory must be writable by UID 10001; `connector.sh` creates it and hands it over, otherwise Docker would create it owned by root.
+Set `CONNECTOR_PROJECT` to run several instances side by side (default: `trustdeck-kafka-connector`); the container is named after the project. Instances started from the same checkout also need their own environment file, passed as `CONNECTOR_ENV_FILE` (default `.env`, relative to the current directory). Copy `.env.example` to, for example, `connector-b.env`; names ending in `.env` are excluded from Git and the image build context. Each file needs its own `HEALTH_HOST_PORT` (default 18080), `STATISTICS_HOST_DIR`, `KAFKA_GROUP_ID` (unless the instances should share the topic's partitions), and source and mapping settings. Truststores and `config/instance/application.yaml` are shared by all instances of a checkout.
 
-Behind an HTTP proxy, export `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` (or the lowercase variants) in the shell that runs `docker compose build`. Compose passes them as build arguments; `apt-get` uses them directly, and Maven receives a temporary `settings.xml` generated from them (`docker/maven-proxy.sh`). They are not stored in the image. For a private Maven repository, pass a complete `settings.xml` instead, which takes precedence: `docker build -f docker/Dockerfile --secret id=maven_settings,src=$HOME/.m2/settings.xml -t trustdeck-kafka-connector:1.0.0 .`
+```sh
+CONNECTOR_PROJECT=trustdeck-connector-b ./connector.sh standalone start
+CONNECTOR_PROJECT=trustdeck-connector-c CONNECTOR_ENV_FILE=connector-c.env ./connector.sh trustdeck start
+```
 
-The base Compose file requires only an `.env`, read-only instance YAML/truststore mounts, and a free health port. The override joins an already existing external `trustdeck` network. It has no fixed container name or mandatory host port. Use HTTPS backend and Keycloak URLs, a valid `SMTP_FROM`, and finite SMTP settings. Health is exposed only at `/actuator/health/readiness` and `/actuator/health/liveness`.
+With plain Compose, pass the same file both as `--env-file` and as `CONNECTOR_ENV_FILE`:
 
-## Verification and Limitations
+```sh
+CONNECTOR_ENV_FILE=$PWD/connector-c.env docker compose --env-file connector-c.env -p trustdeck-connector-c -f docker/compose.yaml up -d
+```
 
-The final local verification matrix is `mvn clean verify` (including strict Javadocs), `git diff --check`, both Compose config commands, the root-context Docker build, and isolated container liveness/readiness probes. Generate and review the dependency/license inventory with `mvn org.codehaus.mojo:license-maven-plugin:2.7.0:add-third-party -Dlicense.includedScopes=compile,runtime`; inspect `target/generated-sources/license/THIRD-PARTY.txt`, including the TrustDeck client and all transitives. The connector HTTP contract suite asserts method, path, query, payload, optional omission, selectors, UUIDs, `omitPrefix=false`, standard/complete updates, combined stages, replay, and ordinary-409 versus linkage-conflict handling for all seven operations. Disposable Kafka/Testcontainers tests use unique resources and never existing infrastructure or the production backlog.
+### Kafka Tuning
 
-Before live deployment, verify synthetic resources and permissions with the TrustDeck service-account UUID: project/type read; enabled entity CRUD; required domain read; pseudonym create/read/update/delete and complete-update permissions; entity pseudonym listing for combined creation; optional pseudonym link/complete-view permissions only when configured; restricted DLT/review ACLs and retention; valid Keycloak client credentials; HTTPS/TLS truststore; and readiness/liveness plus a real end-to-end operation. The connector creates no backend resources.
+New consumer groups start at `earliest`; existing committed offsets take precedence. Inspect and reset offsets only while the consumer is stopped. Defaults are concurrency 2, 100 poll records, batch limits of 100 records and 256 KiB, a 5-second connect timeout, a 30-second read timeout, and three attempts. Keep `max.poll.interval.ms` above the worst-case sequential HTTP and retry time, or lower the poll size. Instances sharing a group divide the partitions between them; instances with different mappings or operations need distinct groups, or they will process records twice or miss them.
 
-Architectural boundaries, not missing work, are strict exactly-once HTTP effects, original Kafka-user REST audit attribution, automatic record-linkage resolution, consumer-disconnect outage semantics, and unavoidable crash windows between a successful HTTP/recovery publication and source commit. The backend's timezone-free `LocalDateTime` and mixed local/UTC comparisons cannot be fully repaired here. Identifier-only reads are ambiguous in multiple-pseudonym domains. Batch 206 responses can lack safe correlation for generated, repeated, or reduced results; the connector then reports unknown outcomes.
+## Statistics
 
-Dependency/license sources: Spring Boot and Spring Kafka are Apache-2.0 (`https://spring.io/projects/spring-boot`, `https://spring.io/projects/spring-kafka`); Jackson is Apache-2.0 (`https://github.com/FasterXML/jackson`); Lombok is MIT (`https://github.com/projectlombok/lombok`); JUnit is EPL-2.0 (`https://github.com/junit-team/junit5`); Testcontainers is MIT (`https://github.com/testcontainers/testcontainers`). The TrustDeck client and this application are Apache-2.0. These are summaries of direct dependencies, not a complete notice. The generated report is the distribution review source for resolved transitives; do not describe EPL components as Apache relicensed.
+Kafka record and batch counters are maintained continuously. When enabled, TrustDeck project and system statistics are sampled every `CONNECTOR_STATISTICS_INTERVAL` and streamed into a hidden temporary file in the output directory. The file is finalized and published atomically after 24 hours, after reaching 256 MiB, or on graceful shutdown; both limits are configurable. The size limit is a soft maximum, since a snapshot is never split between files. After an abrupt termination the current temporary file may be incomplete and is not published.
+
+For a large import, a one-minute interval with daily rotation works well:
+
+```dotenv
+CONNECTOR_STATISTICS_ENABLED=true
+CONNECTOR_STATISTICS_INTERVAL=1m
+CONNECTOR_STATISTICS_OUTPUT_DIRECTORY=statistics
+CONNECTOR_STATISTICS_MAX_FILE_AGE=1d
+CONNECTOR_STATISTICS_MAX_FILE_SIZE=256MB
+```
+
+Each file contains `startedAt`, `finishedAt`, `records`, `batches`, `averageBatchMillis`, and `samples`; counters are relative to that file. The connector requests the lightweight variant of the TrustDeck statistics endpoints: table row counts are PostgreSQL estimates (`recordCountExact: false`) with a running insert counter per table (`insertedRecordCount`), and project entity and pseudonym counts are `null`. This avoids scanning large tables on every sample; insert rates follow from the difference between two samples.
+
+In Docker, files are written to `/app/statistics`, mounted from `STATISTICS_HOST_DIR` (default `statistics/` in the repository root). The directory must be writable by UID 10001; `connector.sh` creates it with the right owner.
+
+## Logging
+
+The console log uses the TrustDeck backend format (`[LEVEL]<tab>yyyy-MM-dd HH:mm:ss,SSS Class:line message`, see `logback-spring.xml`). Third-party libraries log warnings only; set `LOGGING_LEVEL_ROOT=INFO` for Kafka client details, and `LOG_COLORS=never` for log collectors without ANSI support. A statistics sample that keeps failing is logged once at WARN and then at DEBUG.
+
+## Testing
+
+`mvn clean verify` runs the unit tests, the HTTP contract tests for all seven operations, the Testcontainers-based Kafka integration tests (Docker required), and a strict Javadoc check. The integration tests use disposable resources only.
+
+Before going live, verify with synthetic resources: the service-account permissions listed above, DLT and review ACLs and retention, the Keycloak client credentials, the HTTPS truststore, readiness and liveness, and one real end-to-end operation.
+
+## Limitations
+
+- HTTP effects are at-least-once, not exactly-once (see [Delivery and Recovery](#delivery-and-recovery)).
+- TrustDeck audit entries name the connector's service account, not the original Kafka producer.
+- Record-linkage conflicts are sent to review and not resolved automatically.
+- The backend uses timezone-free `LocalDateTime` values; source timestamps are converted to UTC wall-clock time.
+- Identifier-only lookups are ambiguous in domains that allow several pseudonyms per identifier.
+- Batch responses with status 206 cannot always be correlated for generated, repeated, or reduced results; the connector then reports an unknown outcome.
+
+## License
+
+This project is licensed under the Apache License 2.0; see [LICENSE](LICENSE). Direct dependencies: Spring Boot, Spring Kafka, Jackson, and the TrustDeck client (Apache-2.0); Lombok and Testcontainers (MIT); JUnit (EPL-2.0). To review all transitive licenses, run:
+
+```sh
+mvn org.codehaus.mojo:license-maven-plugin:2.7.0:add-third-party -Dlicense.includedScopes=compile,runtime
+```
+
+and inspect `target/generated-sources/license/THIRD-PARTY.txt`.

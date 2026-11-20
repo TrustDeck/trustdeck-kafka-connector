@@ -59,8 +59,7 @@ public record RecoveryEnvelope(String schemaVersion, String status, String sourc
 	/**
 	 * Creates a recovery envelope without explicit project or entity-type target metadata.
 	 *
-	 * This constructor preserves compatibility with existing persisted envelopes
-	 * created before these target fields were added.
+	 * The project and entity-type target fields are left empty.
 	 *
 	 * @param schemaVersion recovery envelope schema version
 	 * @param status terminal recovery status
